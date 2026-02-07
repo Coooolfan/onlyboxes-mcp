@@ -4,7 +4,8 @@ target/
 .gradle-local/
 logs/
 out/
-libs/
+libs/*
+!libs/.gitkeep
 
 ### STS ###
 .apt_generated
