@@ -22,7 +22,7 @@
 `fetchBlob` 不会续租容器，只检查容器是否已过期。
 `listActiveContainers` 不会续租容器，只返回当前 token 下尚未过期的容器剩余秒数。
 
-MCP Endpoint（Streamable）：`http://127.0.0.1:8080/mcp`（请求需携带鉴权 header）
+MCP Endpoint（Streamable）：`http://127.0.0.1:8084/mcp`（请求需携带鉴权 header）
 
 ## 环境要求
 
@@ -31,15 +31,25 @@ MCP Endpoint（Streamable）：`http://127.0.0.1:8080/mcp`（请求需携带鉴�
 ## 快速开始
 
 ```bash
-./gradlew :app:assemble
+./gradlew :app:bootJar
 java -jar app/build/libs/app-all.jar
 ```
 
-启动后默认监听 `8080` 端口。
+启动后默认监听 `8084` 端口。
+
+## Docker
+
+```bash
+./gradlew :app:bootJar
+docker build -t onlyboxes:local .
+docker run --rm -p 8084:8084 onlyboxes:local
+```
+
+CI 会持续产出 `app-all.jar` artifact，并在发布（release published）时推送镜像到 `ghcr.io/<owner>/<repo>`。
 
 ## 可选配置(环境变量)
 
-- `SERVER_PORT`：服务端口（默认 `8080`）
+- `SERVER_PORT`：服务端口（默认 `8084`）
 - `ONLYBOXES_MIN_LEASE_SECONDS`：租约最小秒数（默认 `30`）
 - `ONLYBOXES_MAX_LEASE_SECONDS`：租约最大秒数（默认 `3600`）
 - `ONLYBOXES_AUTH_TOKENS`：允许访问 `/mcp` 的 token 列表（逗号分隔；仅允许 `a-z0-9`）
@@ -71,7 +81,7 @@ java -jar app/build/libs/app-all.jar
 {
   "mcpServers": {
     "onlyboxes": {
-      "url": "http://127.0.0.1:8080/mcp",
+      "url": "http://127.0.0.1:8084/mcp",
       "headers": {
         "X-Onlyboxes-Token": "dev01"
       }
