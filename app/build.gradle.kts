@@ -13,6 +13,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web:4.0.2")
     implementation(platform("org.springframework.ai:spring-ai-bom:2.0.0-M2"))
     implementation("org.springframework.ai:spring-ai-starter-mcp-server-webmvc")
+
+    testImplementation("org.springframework:spring-test")
 }
 
 tasks.named<BootJar>("bootJar") {

@@ -15,6 +15,9 @@ spring:
 onlyboxes:
   lease:
     default-seconds: ${ONLYBOXES_DEFAULT_LEASE_SECONDS:30}
+  auth:
+    header-name: ${ONLYBOXES_AUTH_HEADER_NAME:X-Onlyboxes-Token}
+    allowed-tokens: ${ONLYBOXES_AUTH_TOKENS:}
 
 logging:
   level:

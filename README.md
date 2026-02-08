@@ -19,7 +19,7 @@
 
 `fetchBlob` 内部实现基于 boxlite `copyOut` 将容器文件拉取到宿主临时目录后读取，不再依赖容器内 Python 文件读取。
 
-MCP Endpoint（Streamable）：`http://127.0.0.1:8080/mcp`
+MCP Endpoint（Streamable）：`http://127.0.0.1:8080/mcp`（请求需携带鉴权 header）
 
 ## 环境要求
 
@@ -34,15 +34,23 @@ java -jar app/build/libs/app-all.jar
 
 启动后默认监听 `8080` 端口。
 
-## 可选配置
+## 可选配置(环境变量)
 
 - `SERVER_PORT`：服务端口（默认 `8080`）
 - `ONLYBOXES_DEFAULT_LEASE_SECONDS`：默认租约秒数（默认 `30`）
+- `ONLYBOXES_AUTH_TOKENS`：允许访问 `/mcp` 的 token 列表（逗号分隔；仅允许 `a-z0-9`）
+- `ONLYBOXES_AUTH_HEADER_NAME`：客户端传 token 的 header 名（默认 `X-Onlyboxes-Token`）
+
+说明：
+- 未配置 `ONLYBOXES_AUTH_TOKENS`（或配置为空）时，默认拒绝全部 `/mcp` 请求。
 
 示例：
 
 ```bash
-SERVER_PORT=8081 ONLYBOXES_DEFAULT_LEASE_SECONDS=600 java -jar app/build/libs/app-all.jar
+SERVER_PORT=8081 \
+ONLYBOXES_DEFAULT_LEASE_SECONDS=600 \
+ONLYBOXES_AUTH_TOKENS=dev01,prod9 \
+java -jar app/build/libs/app-all.jar
 ```
 
 ## 客户端接入示例
@@ -53,11 +61,16 @@ SERVER_PORT=8081 ONLYBOXES_DEFAULT_LEASE_SECONDS=600 java -jar app/build/libs/ap
 {
   "mcpServers": {
     "onlyboxes": {
-      "url": "http://127.0.0.1:8080/mcp"
+      "url": "http://127.0.0.1:8080/mcp",
+      "headers": {
+        "X-Onlyboxes-Token": "dev01"
+      }
     }
   }
 }
 ```
+
+如果你通过 `ONLYBOXES_AUTH_HEADER_NAME` 修改了 header 名称，客户端也要同步改成相同的 header。
 
 ## 第三方依赖与许可证
 
