@@ -1,9 +1,27 @@
 import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.jvm.tasks.Jar
 
-val boxliteVersion = "0.5.9"
-val boxliteJarName = "boxlite-java-highlevel-allplatforms-$boxliteVersion.jar"
-val boxliteJar = rootProject.file("libs/$boxliteJarName")
+val boxliteJarCandidates = rootProject.file("libs")
+    .listFiles()
+    ?.filter { jarFile ->
+        jarFile.isFile &&
+            jarFile.name.startsWith("boxlite-java-highlevel-allplatforms-") &&
+            jarFile.name.endsWith(".jar") &&
+            !jarFile.name.endsWith("-sources.jar")
+    }
+    .orEmpty()
+
+val boxliteJar = boxliteJarCandidates.maxByOrNull { it.lastModified() }
+    ?: throw GradleException(
+        "No boxlite highlevel jar found under ${rootProject.file("libs")}." +
+            " Expected boxlite-java-highlevel-allplatforms-<version>.jar",
+    )
+
+val boxliteVersion = Regex("boxlite-java-highlevel-allplatforms-(.+)\\.jar")
+    .matchEntire(boxliteJar.name)
+    ?.groupValues
+    ?.get(1)
+    ?: throw GradleException("Cannot parse boxlite version from jar name: ${boxliteJar.name}")
 
 val sanitizedBoxliteJar by tasks.registering(Jar::class) {
     group = "build"

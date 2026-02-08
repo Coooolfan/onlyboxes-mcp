@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.json.JsonMapper
 import com.coooolfan.onlyboxes.core.service.CodeExecutor
 import com.coooolfan.onlyboxes.core.service.StatefulCodeExecutorService
 import com.coooolfan.onlyboxes.infra.boxlite.BoxliteBoxFactory
-import org.springframework.ai.tool.ToolCallbackProvider
-import org.springframework.ai.tool.method.MethodToolCallbackProvider
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
@@ -43,14 +41,6 @@ class App {
             codeExecutor = codeExecutor,
             defaultLeaseSeconds = defaultLeaseSeconds,
         )
-    }
-
-    @Bean
-    fun toolCallbackProvider(mcpController: McpController): ToolCallbackProvider {
-        return MethodToolCallbackProvider
-            .builder()
-            .toolObjects(mcpController)
-            .build()
     }
 
     companion object {
