@@ -3,7 +3,6 @@ package com.coooolfan.onlyboxes.core
 import com.coooolfan.onlyboxes.core.exception.BoxExpiredException
 import com.coooolfan.onlyboxes.core.exception.BoxNotFoundException
 import com.coooolfan.onlyboxes.core.exception.CodeExecutionException
-import com.coooolfan.onlyboxes.core.exception.InvalidLeaseException
 import com.coooolfan.onlyboxes.core.model.ExecResult
 import com.coooolfan.onlyboxes.core.model.ExecuteStatefulRequest
 import com.coooolfan.onlyboxes.core.model.FetchBlobRequest
@@ -20,6 +19,8 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class StatefulCodeExecutorServiceTest {
@@ -42,86 +43,194 @@ class StatefulCodeExecutorServiceTest {
 
         val created = service.executeStateful(
             ExecuteStatefulRequest(
+                ownerToken = "token-a",
                 name = null,
                 code = "x = 1",
-                leaseSeconds = null,
+                leaseSeconds = 30,
             ),
         )
 
-        assertTrue(created.boxId.startsWith("auto-session-"))
+        assertNotNull(created.boxId)
+        assertEquals(false, created.destroyed)
+        assertEquals(30, created.remainingDestroySeconds)
         assertEquals("stdout:x = 1", created.output.stdout)
     }
 
     @Test
-    fun missingLeaseUsesDefaultThirtySeconds() {
+    fun leaseSecondsLowerBoundIsApplied() {
         val clock = MutableClock(Instant.ofEpochMilli(1_000L))
         val factory = FakeBoxFactory()
         val service = StatefulCodeExecutorService(factory, clock)
 
         val created = service.executeStateful(
             ExecuteStatefulRequest(
+                ownerToken = "token-a",
                 name = null,
                 code = "print('init')",
-                leaseSeconds = null,
+                leaseSeconds = 10,
             ),
         )
 
-        clock.advanceMillis(30_500L)
-
-        assertFailsWith<BoxExpiredException> {
-            service.executeStateful(
-                ExecuteStatefulRequest(
-                    name = created.boxId,
-                    code = "print('still alive')",
-                    leaseSeconds = null,
-                ),
-            )
-        }
+        assertEquals(30, created.remainingDestroySeconds)
     }
 
     @Test
-    fun nonPositiveLeaseIsRejected() {
+    fun leaseSecondsUpperBoundIsApplied() {
+        val clock = MutableClock(Instant.ofEpochMilli(1_000L))
+        val factory = FakeBoxFactory()
+        val service = StatefulCodeExecutorService(factory, clock)
+
+        val created = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = null,
+                code = "print('init')",
+                leaseSeconds = 99_999,
+            ),
+        )
+
+        assertEquals(3600, created.remainingDestroySeconds)
+    }
+
+    @Test
+    fun leaseStartsAfterCommandExecutionAndShorterRenewDoesNotReduceExpiry() {
+        val clock = MutableClock(Instant.ofEpochMilli(0L))
+        val factory = FakeBoxFactory()
+        factory.nextSessionRunHook = { clock.advanceMillis(600_000L) } // 10 min
+        val service = StatefulCodeExecutorService(factory, clock)
+
+        val created = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = null,
+                code = "print('first')",
+                leaseSeconds = 3600,
+            ),
+        )
+        val boxId = assertNotNull(created.boxId)
+        assertEquals(3600, created.remainingDestroySeconds)
+
+        // Move from 12:10 to 12:30.
+        clock.advanceMillis(1_200_000L)
+        factory.sessions.first().runHook = { clock.advanceMillis(600_000L) } // 10 min
+
+        val renewed = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = boxId,
+                code = "print('second')",
+                leaseSeconds = 10,
+            ),
+        )
+
+        // Must remain 13:10, so at 12:40 there are 1800s left.
+        assertEquals(false, renewed.destroyed)
+        assertEquals(boxId, renewed.boxId)
+        assertEquals(1800, renewed.remainingDestroySeconds)
+    }
+
+    @Test
+    fun remainingDestroySecondsUsesCeiling() {
+        val clock = MutableClock(
+            now = Instant.ofEpochMilli(1_000L),
+            stepMillisOnRead = 1L,
+        )
+        val factory = FakeBoxFactory()
+        val service = StatefulCodeExecutorService(factory, clock)
+
+        val created = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = null,
+                code = "print('init')",
+                leaseSeconds = 30,
+            ),
+        )
+
+        // If floor was used this could become 29 because clock moves between now() calls.
+        assertEquals(30, created.remainingDestroySeconds)
+    }
+
+    @Test
+    fun negativeLeaseOnCreateDestroysImmediately() {
         val factory = FakeBoxFactory()
         val service = StatefulCodeExecutorService(factory)
 
-        assertFailsWith<InvalidLeaseException> {
+        val created = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = null,
+                code = "print('init')",
+                leaseSeconds = -1,
+            ),
+        )
+
+        assertEquals(true, created.destroyed)
+        assertNull(created.boxId)
+        assertEquals(0, created.remainingDestroySeconds)
+        assertTrue(factory.sessions.first().closed)
+        assertFailsWith<BoxNotFoundException> {
             service.executeStateful(
                 ExecuteStatefulRequest(
-                    name = null,
+                    ownerToken = "token-a",
+                    name = "auto-session-1",
                     code = "print('x')",
-                    leaseSeconds = 0,
+                    leaseSeconds = 30,
                 ),
             )
         }
     }
 
     @Test
-    fun expiredLeaseThrowsAndClosesBox() {
-        val clock = MutableClock(Instant.ofEpochMilli(1_000L))
+    fun negativeLeaseOnExistingDestroysImmediately() {
         val factory = FakeBoxFactory()
-        val service = StatefulCodeExecutorService(factory, clock)
-
+        val service = StatefulCodeExecutorService(factory)
         val created = service.executeStateful(
             ExecuteStatefulRequest(
+                ownerToken = "token-a",
                 name = null,
                 code = "print('init')",
-                leaseSeconds = 2,
+                leaseSeconds = 30,
+            ),
+        )
+        val boxId = assertNotNull(created.boxId)
+
+        val destroyed = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = boxId,
+                code = "print('destroy')",
+                leaseSeconds = -1,
             ),
         )
 
-        clock.advanceMillis(2_500L)
-
-        assertFailsWith<BoxExpiredException> {
+        assertEquals(true, destroyed.destroyed)
+        assertNull(destroyed.boxId)
+        assertEquals(0, destroyed.remainingDestroySeconds)
+        assertTrue(factory.sessions.first().closed)
+        assertFailsWith<BoxNotFoundException> {
             service.executeStateful(
                 ExecuteStatefulRequest(
-                    name = created.boxId,
-                    code = "print('still alive')",
-                    leaseSeconds = null,
+                    ownerToken = "token-a",
+                    name = boxId,
+                    code = "print('again')",
+                    leaseSeconds = 30,
                 ),
             )
         }
+    }
 
-        assertTrue(factory.sessions.first().closed)
+    @Test
+    fun invalidLeaseBoundsThrowOnStartup() {
+        val factory = FakeBoxFactory()
+
+        assertFailsWith<IllegalStateException> {
+            StatefulCodeExecutorService(
+                boxFactory = factory,
+                minLeaseSeconds = 60,
+                maxLeaseSeconds = 30,
+            )
+        }
     }
 
     @Test
@@ -132,12 +241,119 @@ class StatefulCodeExecutorServiceTest {
         assertFailsWith<BoxNotFoundException> {
             service.executeStateful(
                 ExecuteStatefulRequest(
+                    ownerToken = "token-a",
                     name = "missing",
                     code = "print('x')",
-                    leaseSeconds = null,
+                    leaseSeconds = 30,
                 ),
             )
         }
+    }
+
+    @Test
+    fun crossTokenStatefulAccessThrowsNotFound() {
+        val factory = FakeBoxFactory()
+        val service = StatefulCodeExecutorService(factory)
+        val created = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = null,
+                code = "print('init')",
+                leaseSeconds = 30,
+            ),
+        )
+        val boxId = assertNotNull(created.boxId)
+
+        assertFailsWith<BoxNotFoundException> {
+            service.executeStateful(
+                ExecuteStatefulRequest(
+                    ownerToken = "token-b",
+                    name = boxId,
+                    code = "print('x')",
+                    leaseSeconds = 30,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun sameTokenCanAccessOwnContainer() {
+        val factory = FakeBoxFactory()
+        val service = StatefulCodeExecutorService(factory)
+        val created = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = null,
+                code = "print('init')",
+                leaseSeconds = 30,
+            ),
+        )
+        val boxId = assertNotNull(created.boxId)
+
+        val continued = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = boxId,
+                code = "print('again')",
+                leaseSeconds = 30,
+            ),
+        )
+
+        assertEquals(false, continued.destroyed)
+        assertEquals(boxId, continued.boxId)
+        assertEquals("stdout:print('again')", continued.output.stdout)
+    }
+
+    @Test
+    fun crossTokenFetchBlobThrowsNotFound() {
+        val factory = FakeBoxFactory()
+        val service = StatefulCodeExecutorService(factory)
+        val created = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = null,
+                code = "print('init')",
+                leaseSeconds = 30,
+            ),
+        )
+        val boxId = assertNotNull(created.boxId)
+
+        assertFailsWith<BoxNotFoundException> {
+            service.fetchBlob(
+                FetchBlobRequest(
+                    ownerToken = "token-b",
+                    name = boxId,
+                    path = "/workspace/blob.bin",
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun metricsRemainSharedAcrossTokens() {
+        val factory = FakeBoxFactory()
+        val service = StatefulCodeExecutorService(factory)
+
+        service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = null,
+                code = "print('a')",
+                leaseSeconds = 30,
+            ),
+        )
+        service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-b",
+                name = null,
+                code = "print('b')",
+                leaseSeconds = 30,
+            ),
+        )
+
+        val metrics = service.metrics()
+        assertEquals(2, metrics.boxesCreatedTotal)
+        assertEquals(2, metrics.totalCommandsExecuted)
     }
 
     @Test
@@ -146,11 +362,13 @@ class StatefulCodeExecutorServiceTest {
         val service = StatefulCodeExecutorService(factory)
         val created = service.executeStateful(
             ExecuteStatefulRequest(
+                ownerToken = "token-a",
                 name = null,
                 code = "print('init')",
                 leaseSeconds = 30,
             ),
         )
+        val boxId = assertNotNull(created.boxId)
         val expected = byteArrayOf(1, 2, 3, 4)
         val session = factory.sessions.first()
         session.copyOutHandler = { _, hostDest ->
@@ -159,9 +377,9 @@ class StatefulCodeExecutorServiceTest {
 
         val blob = service.fetchBlob(
             FetchBlobRequest(
-                name = created.boxId,
+                ownerToken = "token-a",
+                name = boxId,
                 path = "/workspace/plot.png",
-                leaseSeconds = 30,
             ),
         )
 
@@ -176,18 +394,20 @@ class StatefulCodeExecutorServiceTest {
         val service = StatefulCodeExecutorService(factory)
         val created = service.executeStateful(
             ExecuteStatefulRequest(
+                ownerToken = "token-a",
                 name = null,
                 code = "print('init')",
                 leaseSeconds = 30,
             ),
         )
+        val boxId = assertNotNull(created.boxId)
 
         assertFailsWith<CodeExecutionException> {
             service.fetchBlob(
                 FetchBlobRequest(
-                    name = created.boxId,
+                    ownerToken = "token-a",
+                    name = boxId,
                     path = "   ",
-                    leaseSeconds = 30,
                 ),
             )
         }
@@ -201,9 +421,46 @@ class StatefulCodeExecutorServiceTest {
         assertFailsWith<BoxNotFoundException> {
             service.fetchBlob(
                 FetchBlobRequest(
+                    ownerToken = "token-a",
                     name = "missing",
                     path = "/tmp/blob.bin",
-                    leaseSeconds = 10,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun fetchBlobDoesNotRenewLease() {
+        val clock = MutableClock(Instant.ofEpochMilli(1_000L))
+        val factory = FakeBoxFactory()
+        val service = StatefulCodeExecutorService(factory, clock)
+        val created = service.executeStateful(
+            ExecuteStatefulRequest(
+                ownerToken = "token-a",
+                name = null,
+                code = "print('init')",
+                leaseSeconds = 30,
+            ),
+        )
+        val boxId = assertNotNull(created.boxId)
+
+        clock.advanceMillis(29_500L)
+        service.fetchBlob(
+            FetchBlobRequest(
+                ownerToken = "token-a",
+                name = boxId,
+                path = "/workspace/blob.bin",
+            ),
+        )
+
+        clock.advanceMillis(600L)
+        assertFailsWith<BoxExpiredException> {
+            service.executeStateful(
+                ExecuteStatefulRequest(
+                    ownerToken = "token-a",
+                    name = boxId,
+                    code = "print('after fetch')",
+                    leaseSeconds = 30,
                 ),
             )
         }
@@ -216,20 +473,22 @@ class StatefulCodeExecutorServiceTest {
         val service = StatefulCodeExecutorService(factory, clock)
         val created = service.executeStateful(
             ExecuteStatefulRequest(
+                ownerToken = "token-a",
                 name = null,
                 code = "print('init')",
-                leaseSeconds = 2,
+                leaseSeconds = 30,
             ),
         )
+        val boxId = assertNotNull(created.boxId)
 
-        clock.advanceMillis(2_500L)
+        clock.advanceMillis(30_500L)
 
         assertFailsWith<BoxExpiredException> {
             service.fetchBlob(
                 FetchBlobRequest(
-                    name = created.boxId,
+                    ownerToken = "token-a",
+                    name = boxId,
                     path = "/tmp/blob.bin",
-                    leaseSeconds = null,
                 ),
             )
         }
@@ -243,11 +502,13 @@ class StatefulCodeExecutorServiceTest {
         val service = StatefulCodeExecutorService(factory)
         val created = service.executeStateful(
             ExecuteStatefulRequest(
+                ownerToken = "token-a",
                 name = null,
                 code = "print('init')",
                 leaseSeconds = 30,
             ),
         )
+        val boxId = assertNotNull(created.boxId)
         val session = factory.sessions.first()
         session.copyOutHandler = { _, hostDest ->
             Files.write(hostDest.resolve("a.txt"), "a".toByteArray())
@@ -257,9 +518,9 @@ class StatefulCodeExecutorServiceTest {
         val ex = assertFailsWith<CodeExecutionException> {
             service.fetchBlob(
                 FetchBlobRequest(
-                    name = created.boxId,
+                    ownerToken = "token-a",
+                    name = boxId,
                     path = "/workspace/multi",
-                    leaseSeconds = 30,
                 ),
             )
         }
@@ -269,9 +530,15 @@ class StatefulCodeExecutorServiceTest {
 
     private class FakeBoxFactory : BoxFactory {
         val sessions = mutableListOf<FakeBoxSession>()
+        var nextSessionRunHook: ((String) -> Unit)? = null
 
         override fun createStartedBox(): BoxSession {
             val session = FakeBoxSession("session-${sessions.size + 1}")
+            val runHook = nextSessionRunHook
+            if (runHook != null) {
+                session.runHook = runHook
+                nextSessionRunHook = null
+            }
             sessions += session
             return session
         }
@@ -294,6 +561,7 @@ class StatefulCodeExecutorServiceTest {
         var closed = false
         val executedCodes = mutableListOf<String>()
         val copiedSources = mutableListOf<String>()
+        var runHook: (String) -> Unit = {}
         var copyOutHandler: (containerSrc: String, hostDest: Path) -> Unit = { containerSrc, hostDest ->
             val fileName = runCatching { Path.of(containerSrc).fileName?.toString() }
                 .getOrNull()
@@ -304,6 +572,7 @@ class StatefulCodeExecutorServiceTest {
 
         override fun run(code: String): ExecResult {
             executedCodes += code
+            runHook(code)
             return ExecResult(
                 exitCode = 0,
                 stdout = "stdout:$code",
@@ -325,12 +594,19 @@ class StatefulCodeExecutorServiceTest {
 
     private class MutableClock(
         private var now: Instant,
+        private val stepMillisOnRead: Long = 0L,
     ) : Clock() {
         override fun withZone(zone: ZoneId?): Clock = this
 
         override fun getZone(): ZoneId = ZoneId.of("UTC")
 
-        override fun instant(): Instant = now
+        override fun instant(): Instant {
+            val current = now
+            if (stepMillisOnRead != 0L) {
+                now = now.plusMillis(stepMillisOnRead)
+            }
+            return current
+        }
 
         fun advanceMillis(delta: Long) {
             now = now.plusMillis(delta)

@@ -3,7 +3,6 @@ package com.coooolfan.onlyboxes.core.service
 import com.coooolfan.onlyboxes.core.exception.BoxExpiredException
 import com.coooolfan.onlyboxes.core.exception.BoxNotFoundException
 import com.coooolfan.onlyboxes.core.exception.CodeExecutionException
-import com.coooolfan.onlyboxes.core.exception.InvalidLeaseException
 import com.coooolfan.onlyboxes.core.model.ExecResult
 import com.coooolfan.onlyboxes.core.model.ExecuteStatefulRequest
 import com.coooolfan.onlyboxes.core.model.ExecuteStatefulResult
@@ -20,18 +19,32 @@ import java.util.concurrent.ConcurrentHashMap
 class StatefulCodeExecutorService(
     private val boxFactory: BoxFactory,
     private val clock: Clock = Clock.systemUTC(),
-    private val defaultLeaseSeconds: Long = DEFAULT_LEASE_SECONDS,
+    private val minLeaseSeconds: Long = DEFAULT_MIN_LEASE_SECONDS,
+    private val maxLeaseSeconds: Long = DEFAULT_MAX_LEASE_SECONDS,
 ) : CodeExecutor {
 
     init {
-        require(defaultLeaseSeconds > 0L) { "defaultLeaseSeconds must be > 0, but was $defaultLeaseSeconds" }
+        require(minLeaseSeconds > 0L) { "minLeaseSeconds must be > 0, but was $minLeaseSeconds" }
+        require(maxLeaseSeconds > 0L) { "maxLeaseSeconds must be > 0, but was $maxLeaseSeconds" }
+        if (minLeaseSeconds > maxLeaseSeconds) {
+            throw IllegalStateException(
+                "onlyboxes.lease.min-seconds must be <= onlyboxes.lease.max-seconds, " +
+                    "but was min=$minLeaseSeconds max=$maxLeaseSeconds",
+            )
+        }
     }
 
     companion object {
-        private const val DEFAULT_LEASE_SECONDS = 30L
+        private const val DEFAULT_MIN_LEASE_SECONDS = 30L
+        private const val DEFAULT_MAX_LEASE_SECONDS = 3600L
     }
 
-    private val boxLeases = ConcurrentHashMap<String, BoxLease>()
+    private val boxLeases = ConcurrentHashMap<LeaseKey, BoxLease>()
+
+    private data class LeaseKey(
+        val ownerToken: String,
+        val boxName: String,
+    )
 
     private data class BoxLease(
         val box: BoxSession,
@@ -44,25 +57,16 @@ class StatefulCodeExecutorService(
     }
 
     override fun executeStateful(request: ExecuteStatefulRequest): ExecuteStatefulResult {
-        val leaseSeconds = request.leaseSeconds ?: defaultLeaseSeconds
+        val ownerToken = normalizeOwnerToken(request.ownerToken)
         val normalizedName = request.name?.trim()?.takeIf { it.isNotEmpty() }
         if (normalizedName == null) {
-            val box = boxFactory.createStartedBox()
-            val lease = BoxLease(box = box, expiresAtEpochMs = null)
-            renewLease(lease, leaseSeconds)
-
-            val newName = "auto-${box.sessionId}"
-            boxLeases[newName] = lease
-            return ExecuteStatefulResult(boxId = newName, output = box.run(request.code))
+            return createStateful(ownerToken, request.code, request.leaseSeconds)
         }
-
-        val lease = boxLeases[normalizedName] ?: throw BoxNotFoundException(normalizedName)
-        cleanupIfExpired(normalizedName, lease)
-        renewLease(lease, leaseSeconds)
-        return ExecuteStatefulResult(boxId = normalizedName, output = lease.box.run(request.code))
+        return continueStateful(ownerToken, normalizedName, request.code, request.leaseSeconds)
     }
 
     override fun fetchBlob(request: FetchBlobRequest): FetchedBlob {
+        val ownerToken = normalizeOwnerToken(request.ownerToken)
         val normalizedName = request.name.trim()
             .takeIf { it.isNotEmpty() }
             ?: throw CodeExecutionException("Box name must not be empty")
@@ -71,10 +75,9 @@ class StatefulCodeExecutorService(
             throw CodeExecutionException("Blob file path must not be empty")
         }
 
-        val leaseSeconds = request.leaseSeconds ?: defaultLeaseSeconds
-        val lease = boxLeases[normalizedName] ?: throw BoxNotFoundException(normalizedName)
-        cleanupIfExpired(normalizedName, lease)
-        renewLease(lease, leaseSeconds)
+        val leaseKey = LeaseKey(ownerToken = ownerToken, boxName = normalizedName)
+        val lease = boxLeases[leaseKey] ?: throw BoxNotFoundException(normalizedName)
+        cleanupIfExpired(leaseKey, normalizedName, lease)
 
         val tempDir = try {
             Files.createTempDirectory("onlyboxes-copyout-")
@@ -105,29 +108,121 @@ class StatefulCodeExecutorService(
 
     override fun metrics(): RuntimeMetricsView = boxFactory.metrics()
 
-    private fun renewLease(lease: BoxLease, leaseSeconds: Long) {
-        if (leaseSeconds <= 0L) {
-            throw InvalidLeaseException(leaseSeconds)
+    private fun createStateful(
+        ownerToken: String,
+        code: String,
+        leaseSeconds: Long,
+    ): ExecuteStatefulResult {
+        val box = boxFactory.createStartedBox()
+        val output = try {
+            box.run(code)
+        } catch (ex: Exception) {
+            closeQuietly(box)
+            throw ex
         }
 
-        val deltaMillis = try {
-            Math.multiplyExact(leaseSeconds, 1000L)
-        } catch (_: ArithmeticException) {
-            throw InvalidLeaseException(leaseSeconds)
+        if (leaseSeconds < 0L) {
+            closeQuietly(box)
+            return ExecuteStatefulResult(
+                boxId = null,
+                destroyed = true,
+                remainingDestroySeconds = 0L,
+                output = output,
+            )
         }
 
-        lease.expiresAtEpochMs = clock.millis() + deltaMillis
+        val appliedLeaseSeconds = clampLeaseSeconds(leaseSeconds)
+        val candidateExpiresAt = candidateExpiresAtEpochMs(appliedLeaseSeconds)
+        val newName = "auto-${box.sessionId}"
+        boxLeases[LeaseKey(ownerToken = ownerToken, boxName = newName)] = BoxLease(
+            box = box,
+            expiresAtEpochMs = candidateExpiresAt,
+        )
+
+        return ExecuteStatefulResult(
+            boxId = newName,
+            destroyed = false,
+            remainingDestroySeconds = computeRemainingSecondsCeil(candidateExpiresAt),
+            output = output,
+        )
     }
 
-    private fun cleanupIfExpired(name: String, lease: BoxLease) {
+    private fun continueStateful(
+        ownerToken: String,
+        boxName: String,
+        code: String,
+        leaseSeconds: Long,
+    ): ExecuteStatefulResult {
+        val leaseKey = LeaseKey(ownerToken = ownerToken, boxName = boxName)
+        val lease = boxLeases[leaseKey] ?: throw BoxNotFoundException(boxName)
+        cleanupIfExpired(leaseKey, boxName, lease)
+
+        if (leaseSeconds < 0L) {
+            val output = try {
+                lease.box.run(code)
+            } finally {
+                destroyLease(leaseKey, lease)
+            }
+            return ExecuteStatefulResult(
+                boxId = null,
+                destroyed = true,
+                remainingDestroySeconds = 0L,
+                output = output,
+            )
+        }
+
+        val output = lease.box.run(code)
+        val appliedLeaseSeconds = clampLeaseSeconds(leaseSeconds)
+        val candidateExpiresAt = candidateExpiresAtEpochMs(appliedLeaseSeconds)
+        val currentExpiresAt = lease.expiresAtEpochMs ?: Long.MIN_VALUE
+        val nextExpiresAt = maxOf(currentExpiresAt, candidateExpiresAt)
+        lease.expiresAtEpochMs = nextExpiresAt
+
+        return ExecuteStatefulResult(
+            boxId = boxName,
+            destroyed = false,
+            remainingDestroySeconds = computeRemainingSecondsCeil(nextExpiresAt),
+            output = output,
+        )
+    }
+
+    private fun cleanupIfExpired(leaseKey: LeaseKey, name: String, lease: BoxLease) {
         val expiresAt = lease.expiresAtEpochMs ?: return
         if (clock.millis() < expiresAt) {
             return
         }
 
-        boxLeases.remove(name, lease)
+        boxLeases.remove(leaseKey, lease)
         closeQuietly(lease.box)
         throw BoxExpiredException(name)
+    }
+
+    private fun destroyLease(leaseKey: LeaseKey, lease: BoxLease) {
+        boxLeases.remove(leaseKey, lease)
+        closeQuietly(lease.box)
+    }
+
+    private fun clampLeaseSeconds(requestedLeaseSeconds: Long): Long {
+        return requestedLeaseSeconds.coerceIn(minLeaseSeconds, maxLeaseSeconds)
+    }
+
+    private fun candidateExpiresAtEpochMs(appliedLeaseSeconds: Long): Long {
+        val deltaMillis = Math.multiplyExact(appliedLeaseSeconds, 1000L)
+        return Math.addExact(clock.millis(), deltaMillis)
+    }
+
+    private fun computeRemainingSecondsCeil(expiresAtEpochMs: Long): Long {
+        val remainingMillis = expiresAtEpochMs - clock.millis()
+        if (remainingMillis <= 0L) {
+            return 0L
+        }
+        return (remainingMillis + 999L) / 1000L
+    }
+
+    private fun normalizeOwnerToken(ownerTokenRaw: String): String {
+        return ownerTokenRaw.trim()
+            .takeIf { it.isNotEmpty() }
+            ?: throw CodeExecutionException("Owner token must not be empty")
     }
 
     fun closeAll() {

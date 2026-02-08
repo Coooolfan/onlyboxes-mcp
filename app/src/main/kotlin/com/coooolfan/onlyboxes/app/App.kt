@@ -22,24 +22,26 @@ class App {
 
     @Bean
     fun codeExecutor(
-        @Value("\${onlyboxes.lease.default-seconds:30}")
-        defaultLeaseSeconds: Long,
+        @Value("\${onlyboxes.lease.min-seconds:30}")
+        minLeaseSeconds: Long,
+        @Value("\${onlyboxes.lease.max-seconds:3600}")
+        maxLeaseSeconds: Long,
     ): CodeExecutor {
         return StatefulCodeExecutorService(
             boxFactory = BoxliteBoxFactory(),
-            defaultLeaseSeconds = defaultLeaseSeconds,
+            minLeaseSeconds = minLeaseSeconds,
+            maxLeaseSeconds = maxLeaseSeconds,
         )
     }
 
     @Bean
     fun mcpController(
         codeExecutor: CodeExecutor,
-        @Value("\${onlyboxes.lease.default-seconds:30}")
-        defaultLeaseSeconds: Long,
+        authTokenProvider: AuthTokenProvider,
     ): McpController {
         return McpController(
             codeExecutor = codeExecutor,
-            defaultLeaseSeconds = defaultLeaseSeconds,
+            authTokenProvider = authTokenProvider,
         )
     }
 

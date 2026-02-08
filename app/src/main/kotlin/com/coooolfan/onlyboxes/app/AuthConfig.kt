@@ -51,6 +51,9 @@ class AuthConfig {
             addUrlPatterns(*resolveUrlPatterns(mcpEndpoint).toTypedArray())
         }
     }
+
+    @Bean
+    fun authTokenProvider(): AuthTokenProvider = ThreadLocalAuthTokenProvider()
 }
 
 class TokenAuthFilter(
@@ -72,7 +75,12 @@ class TokenAuthFilter(
             rejectUnauthorized(response)
             return
         }
-        filterChain.doFilter(request, response)
+        AuthTokenContextHolder.bindToken(token)
+        try {
+            filterChain.doFilter(request, response)
+        } finally {
+            AuthTokenContextHolder.clear()
+        }
     }
 
     private fun matchesProtectedEndpoint(request: HttpServletRequest): Boolean {

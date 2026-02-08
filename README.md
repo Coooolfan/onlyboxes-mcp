@@ -13,11 +13,12 @@
 | 工具 | 入参 | 出参 |
 | --- | --- | --- |
 | `pythonExecute` | `code: string` | `ExecResult`：`exitCode`、`stdout`、`stderr`、`errorMessage`、`success` |
-| `pythonExecuteStateful` | `name?: string`、`code: string`、`leaseSeconds?: long`（不传时默认 `30` 秒） | `ExecuteStatefulResponse`：`boxId`、`output`（`ExecResult`） |
+| `pythonExecuteStateful` | `name?: string`、`code: string`、`leaseSeconds: long`（必填） | `ExecuteStatefulResponse`：`boxId?`、`destroyed`、`remainingDestroySeconds`、`output`（`ExecResult`） |
 | `fetchBlob` | `path: string`、`name: string` | `CallToolResult`：图片返回 `ImageContent(base64 + mimeType)`，其他文件返回 `mimeType` 与 base64 文本 |
 | `metrics` | 无 | `RuntimeMetricsView`：`boxesCreatedTotal`、`boxesFailedTotal`、`boxesStoppedTotal`、`numRunningBoxes`、`totalCommandsExecuted`、`totalExecErrors` |
 
 `fetchBlob` 内部实现基于 boxlite `copyOut` 将容器文件拉取到宿主临时目录后读取，不再依赖容器内 Python 文件读取。
+`fetchBlob` 不会续租容器，只检查容器是否已过期。
 
 MCP Endpoint（Streamable）：`http://127.0.0.1:8080/mcp`（请求需携带鉴权 header）
 
@@ -37,18 +38,25 @@ java -jar app/build/libs/app-all.jar
 ## 可选配置(环境变量)
 
 - `SERVER_PORT`：服务端口（默认 `8080`）
-- `ONLYBOXES_DEFAULT_LEASE_SECONDS`：默认租约秒数（默认 `30`）
+- `ONLYBOXES_MIN_LEASE_SECONDS`：租约最小秒数（默认 `30`）
+- `ONLYBOXES_MAX_LEASE_SECONDS`：租约最大秒数（默认 `3600`）
 - `ONLYBOXES_AUTH_TOKENS`：允许访问 `/mcp` 的 token 列表（逗号分隔；仅允许 `a-z0-9`）
 - `ONLYBOXES_AUTH_HEADER_NAME`：客户端传 token 的 header 名（默认 `X-Onlyboxes-Token`）
 
 说明：
 - 未配置 `ONLYBOXES_AUTH_TOKENS`（或配置为空）时，默认拒绝全部 `/mcp` 请求。
+- `ONLYBOXES_MIN_LEASE_SECONDS` 大于 `ONLYBOXES_MAX_LEASE_SECONDS` 时，服务启动失败。
+- `pythonExecuteStateful` 租约语义：
+  - `leaseSeconds >= 0`：先收束到 `[min,max]`，并从命令执行完成后开始计时。
+  - `leaseSeconds < 0`：命令执行后立即销毁容器，返回 `destroyed=true`、`boxId=null`、`remainingDestroySeconds=0`。
+- 同一个容器多次调用时，过期时间只会延长，不会被更短租约缩短。
 
 示例：
 
 ```bash
 SERVER_PORT=8081 \
-ONLYBOXES_DEFAULT_LEASE_SECONDS=600 \
+ONLYBOXES_MIN_LEASE_SECONDS=30 \
+ONLYBOXES_MAX_LEASE_SECONDS=3600 \
 ONLYBOXES_AUTH_TOKENS=dev01,prod9 \
 java -jar app/build/libs/app-all.jar
 ```

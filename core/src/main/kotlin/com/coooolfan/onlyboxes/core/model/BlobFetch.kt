@@ -1,9 +1,9 @@
 package com.coooolfan.onlyboxes.core.model
 
 data class FetchBlobRequest(
+    val ownerToken: String,
     val name: String,
     val path: String,
-    val leaseSeconds: Long?,
 )
 
 class FetchedBlob(

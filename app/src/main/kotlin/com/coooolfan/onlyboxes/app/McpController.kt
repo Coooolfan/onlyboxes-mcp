@@ -12,18 +12,14 @@ import io.modelcontextprotocol.spec.McpSchema
 import org.springaicommunity.mcp.annotation.McpTool
 import org.springaicommunity.mcp.annotation.McpToolParam
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Value
 import java.net.URLConnection
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Base64
 
-private const val DEFAULT_LEASE_SECONDS = 30L
-
 class McpController(
     private val codeExecutor: CodeExecutor,
-    @param:Value("\${onlyboxes.lease.default-seconds:30}")
-    private val defaultLeaseSeconds: Long = DEFAULT_LEASE_SECONDS,
+    private val authTokenProvider: AuthTokenProvider,
 ) {
     private val logger = LoggerFactory.getLogger(McpController::class.java)
 
@@ -37,21 +33,24 @@ class McpController(
         @McpToolParam(description = "Python code to execute")
         code: String,
         @McpToolParam(
-            description = "Lease seconds for this stateful container (renewal). After this time the container becomes unavailable",
-            required = false,
+            description = "Lease seconds for this stateful container renewal. Non-negative values are clamped to [min,max] and start counting after command execution. Negative values destroy the container immediately after command execution.",
+            required = true,
         )
-        leaseSeconds: Long?,
+        leaseSeconds: Long,
     ): ExecuteStatefulResponse {
         val result = codeExecutor.executeStateful(
             ExecuteStatefulRequest(
+                ownerToken = authTokenProvider.requireToken(),
                 name = name,
                 code = code,
-                leaseSeconds = leaseSeconds ?: defaultLeaseSeconds.takeIf { it > 0L },
+                leaseSeconds = leaseSeconds,
             ),
         )
 
         return ExecuteStatefulResponse(
             boxId = result.boxId,
+            destroyed = result.destroyed,
+            remainingDestroySeconds = result.remainingDestroySeconds,
             output = result.output,
         )
     }
@@ -91,9 +90,9 @@ class McpController(
         val fetchedBlob = try {
             codeExecutor.fetchBlob(
                 FetchBlobRequest(
+                    ownerToken = authTokenProvider.requireToken(),
                     name = normalizedName,
                     path = normalizedPath,
-                    leaseSeconds = defaultLeaseSeconds.takeIf { it > 0L },
                 ),
             )
         } catch (ex: BoxNotFoundException) {
@@ -156,6 +155,8 @@ class McpController(
 }
 
 data class ExecuteStatefulResponse(
-    val boxId: String,
+    val boxId: String?,
+    val destroyed: Boolean,
+    val remainingDestroySeconds: Long,
     val output: ExecResult,
 )

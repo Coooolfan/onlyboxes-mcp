@@ -12,6 +12,7 @@ import io.modelcontextprotocol.spec.McpSchema
 import java.util.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -19,7 +20,7 @@ class McpControllerTest {
     @Test
     fun statefulExecutionDelegatesToCodeExecutor() {
         val executor = FakeCodeExecutor()
-        val controller = McpController(executor)
+        val controller = McpController(executor, FixedAuthTokenProvider("token-a"))
 
         val result = controller.pythonExecuteStateful(
             name = "box-1",
@@ -28,14 +29,18 @@ class McpControllerTest {
         )
 
         assertEquals("box-1", result.boxId)
+        assertEquals(false, result.destroyed)
+        assertEquals(180, result.remainingDestroySeconds)
+        assertEquals("token-a", executor.lastStatefulRequest?.ownerToken)
         assertEquals("print('hello')", executor.lastStatefulRequest?.code)
+        assertEquals(20, executor.lastStatefulRequest?.leaseSeconds)
         assertEquals("out:print('hello')", result.output.stdout)
     }
 
     @Test
     fun statelessExecutionDelegatesToCodeExecutor() {
         val executor = FakeCodeExecutor()
-        val controller = McpController(executor)
+        val controller = McpController(executor, FixedAuthTokenProvider("token-a"))
 
         val result = controller.pythonExecute("print('x')")
 
@@ -46,7 +51,7 @@ class McpControllerTest {
     @Test
     fun metricsDelegatesToCodeExecutor() {
         val executor = FakeCodeExecutor()
-        val controller = McpController(executor)
+        val controller = McpController(executor, FixedAuthTokenProvider("token-a"))
 
         val result = controller.metrics()
 
@@ -55,14 +60,14 @@ class McpControllerTest {
     }
 
     @Test
-    fun statefulExecutionUsesConfiguredDefaultLeaseWhenMissing() {
+    fun statefulExecutionPassesLeaseSeconds() {
         val executor = FakeCodeExecutor()
-        val controller = McpController(executor, defaultLeaseSeconds = 45)
+        val controller = McpController(executor, FixedAuthTokenProvider("token-a"))
 
         controller.pythonExecuteStateful(
             name = "box-1",
             code = "print('hello')",
-            leaseSeconds = null,
+            leaseSeconds = 45,
         )
 
         assertEquals(45, executor.lastStatefulRequest?.leaseSeconds)
@@ -76,7 +81,7 @@ class McpControllerTest {
             path = "/workspace/plot.png",
             bytes = blobBytes,
         )
-        val controller = McpController(executor)
+        val controller = McpController(executor, FixedAuthTokenProvider("token-a"))
 
         val result = controller.fetchBlob(
             path = "/workspace/plot.png",
@@ -85,9 +90,9 @@ class McpControllerTest {
 
         assertEquals(
             FetchBlobRequest(
+                ownerToken = "token-a",
                 name = "box-1",
                 path = "/workspace/plot.png",
-                leaseSeconds = 30,
             ),
             executor.lastFetchBlobRequest,
         )
@@ -105,7 +110,7 @@ class McpControllerTest {
             path = "/workspace/data.bin",
             bytes = blobBytes,
         )
-        val controller = McpController(executor)
+        val controller = McpController(executor, FixedAuthTokenProvider("token-a"))
 
         val result = controller.fetchBlob(
             path = "/workspace/data.bin",
@@ -125,7 +130,7 @@ class McpControllerTest {
     fun fetchBlobReturnsErrorResultWhenFetchFails() {
         val executor = FakeCodeExecutor()
         executor.fetchBlobFailure = CodeExecutionException("boom")
-        val controller = McpController(executor)
+        val controller = McpController(executor, FixedAuthTokenProvider("token-a"))
 
         val result = controller.fetchBlob(
             path = "/workspace/data.bin",
@@ -140,7 +145,7 @@ class McpControllerTest {
     @Test
     fun fetchBlobRejectsTmpPathEarly() {
         val executor = FakeCodeExecutor()
-        val controller = McpController(executor)
+        val controller = McpController(executor, FixedAuthTokenProvider("token-a"))
 
         val result = controller.fetchBlob(
             path = "/tmp/restart_test.svg",
@@ -153,6 +158,50 @@ class McpControllerTest {
         assertNull(executor.lastFetchBlobRequest)
     }
 
+    @Test
+    fun statefulExecutionFailsWhenTokenContextMissing() {
+        val executor = FakeCodeExecutor()
+        val controller = McpController(executor, FixedAuthTokenProvider(null))
+
+        assertFailsWith<CodeExecutionException> {
+            controller.pythonExecuteStateful(
+                name = "box-1",
+                code = "print('hello')",
+                leaseSeconds = 20,
+            )
+        }
+    }
+
+    @Test
+    fun statefulExecutionReturnsDestroyedWhenExecutorDestroysContainer() {
+        val executor = FakeCodeExecutor().apply {
+            nextStatefulResult = ExecuteStatefulResult(
+                boxId = null,
+                destroyed = true,
+                remainingDestroySeconds = 0,
+                output = ExecResult(
+                    exitCode = 0,
+                    stdout = "out:print('bye')",
+                    stderr = "",
+                    errorMessage = null,
+                    success = true,
+                ),
+            )
+        }
+        val controller = McpController(executor, FixedAuthTokenProvider("token-a"))
+
+        val result = controller.pythonExecuteStateful(
+            name = "box-1",
+            code = "print('bye')",
+            leaseSeconds = -1,
+        )
+
+        assertEquals(null, result.boxId)
+        assertEquals(true, result.destroyed)
+        assertEquals(0, result.remainingDestroySeconds)
+        assertEquals(-1, executor.lastStatefulRequest?.leaseSeconds)
+    }
+
     private class FakeCodeExecutor : CodeExecutor {
         var lastCode: String? = null
         var lastStatefulRequest: ExecuteStatefulRequest? = null
@@ -162,6 +211,7 @@ class McpControllerTest {
             bytes = byteArrayOf(0),
         )
         var fetchBlobFailure: RuntimeException? = null
+        var nextStatefulResult: ExecuteStatefulResult? = null
 
         override fun execute(code: String): ExecResult {
             lastCode = code
@@ -176,8 +226,14 @@ class McpControllerTest {
 
         override fun executeStateful(request: ExecuteStatefulRequest): ExecuteStatefulResult {
             lastStatefulRequest = request
+            val presetResult = nextStatefulResult
+            if (presetResult != null) {
+                return presetResult
+            }
             return ExecuteStatefulResult(
                 boxId = request.name ?: "auto-box",
+                destroyed = false,
+                remainingDestroySeconds = 180,
                 output = ExecResult(
                     exitCode = 0,
                     stdout = "out:${request.code}",
@@ -206,6 +262,14 @@ class McpControllerTest {
                 totalCommandsExecuted = 6,
                 totalExecErrors = 0,
             )
+        }
+    }
+
+    private class FixedAuthTokenProvider(
+        private val token: String?,
+    ) : AuthTokenProvider {
+        override fun requireToken(): String {
+            return token ?: throw CodeExecutionException("Authentication token context is missing")
         }
     }
 }
