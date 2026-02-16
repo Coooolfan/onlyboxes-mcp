@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package onlyboxes.registry.v1;
+
+option go_package = "github.com/onlyboxes/onlyboxes/api/gen/go/registry/v1;registryv1";
+
+message LanguageCapability {
+  string language = 1;
+  string version = 2;
+}
+
+message RegisterRequest {
+  string node_id = 1;
+  string node_name = 2;
+  string executor_kind = 3;
+  repeated LanguageCapability languages = 4;
+  map<string, string> labels = 5;
+  string version = 6;
+}
+
+message RegisterResponse {
+  int64 server_time_unix_ms = 1;
+  int32 heartbeat_interval_sec = 2;
+  int32 offline_ttl_sec = 3;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+}
+
+message HeartbeatResponse {
+  int64 server_time_unix_ms = 1;
+  int32 heartbeat_interval_sec = 2;
+  int32 offline_ttl_sec = 3;
+}
+
+service WorkerRegistryService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}

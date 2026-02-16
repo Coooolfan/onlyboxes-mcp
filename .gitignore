@@ -1,38 +1,34 @@
-target/
-!.mvn/wrapper/maven-wrapper.jar
-.gradle/
-.gradle-local/
+# OS artifacts
+.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/
+*.sw?
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Logs
 logs/
-out/
-libs/*
-!libs/.gitkeep
-
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
 *.log
-*.flattened-pom.xml
-*.class
 
-### NetBeans ###
-nbproject/private/
-build/
-nbbuild/
-dist/
-nbdist/
-.nb-gradle/
+# Go build artifacts
+bin/
+*.test
+*.out
+coverage.out
 
-### Mac files ###
-*.DS_Store
-
+# Python artifacts
 *.pyc
+
+# Frontend artifacts (web)
+web/node_modules/
+web/dist/
+web/dist-ssr/
+web/coverage/
+web/.eslintcache
+web/.yarn/install-state.gz
+web/*.local
+web/*.tsbuildinfo
