@@ -36,6 +36,11 @@ interface WorkerStatsResponse {
   generated_at: string
 }
 
+interface WorkerStartupCommandResponse {
+  node_id: string
+  command: string
+}
+
 const pageSize = 25
 const staleAfterDefaultSec = 30
 const statusFilter = ref<WorkerStatus>('all')
@@ -51,6 +56,9 @@ const loginUsername = ref('')
 const loginPassword = ref('')
 const loginErrorMessage = ref('')
 const loginSubmitting = ref(false)
+const copyingNodeID = ref('')
+const copiedNodeID = ref('')
+const copyFailedNodeID = ref('')
 
 const dashboardStats = ref<WorkerStatsResponse>(emptyStats())
 const currentList = ref<WorkerListResponse | null>(null)
@@ -58,6 +66,7 @@ const currentList = ref<WorkerListResponse | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 let loadRequestSerial = 0
 let activeController: AbortController | null = null
+let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 
 class UnauthorizedError extends Error {
   constructor() {
@@ -261,6 +270,42 @@ async function fetchStats(staleAfterSec: number, signal: AbortSignal): Promise<W
   }
 }
 
+async function fetchWorkerStartupCommand(nodeID: string): Promise<string> {
+  const response = await fetch(`/api/v1/workers/${encodeURIComponent(nodeID)}/startup-command`, {
+    headers: {
+      Accept: 'application/json',
+    },
+    credentials: 'same-origin',
+  })
+
+  if (response.status === 401) {
+    throw new UnauthorizedError()
+  }
+  if (!response.ok) {
+    const apiError = await parseAPIError(response)
+    throw new Error(apiError)
+  }
+
+  const payload = (await response.json()) as WorkerStartupCommandResponse
+  const command = payload.command?.trim()
+  if (!command) {
+    throw new Error('API returned empty startup command.')
+  }
+  return command
+}
+
+async function parseAPIError(response: Response): Promise<string> {
+  try {
+    const payload = (await response.json()) as { error?: string }
+    if (typeof payload.error === 'string' && payload.error.trim() !== '') {
+      return payload.error
+    }
+  } catch {
+    // ignore json parsing errors and use default status text
+  }
+  return `API ${response.status}: ${response.statusText}`
+}
+
 function emptyStats(): WorkerStatsResponse {
   return {
     total: 0,
@@ -280,11 +325,108 @@ function resetDashboard(): void {
 }
 
 function switchToUnauthenticatedState(): void {
+  resetCopyFeedback()
   authState.value = 'unauthenticated'
   loginErrorMessage.value = ''
   loginPassword.value = ''
   errorMessage.value = ''
   resetDashboard()
+}
+
+function startupCopyButtonText(nodeID: string): string {
+  if (copyingNodeID.value === nodeID) {
+    return 'Copying...'
+  }
+  if (copiedNodeID.value === nodeID) {
+    return 'Copied'
+  }
+  if (copyFailedNodeID.value === nodeID) {
+    return 'Copy Failed'
+  }
+  return 'Copy Start Cmd'
+}
+
+function scheduleCopyFeedbackReset(): void {
+  if (copyFeedbackTimer) {
+    clearTimeout(copyFeedbackTimer)
+  }
+  copyFeedbackTimer = setTimeout(() => {
+    copiedNodeID.value = ''
+    copyFailedNodeID.value = ''
+    copyFeedbackTimer = null
+  }, 1500)
+}
+
+function resetCopyFeedback(): void {
+  if (copyFeedbackTimer) {
+    clearTimeout(copyFeedbackTimer)
+    copyFeedbackTimer = null
+  }
+  copyingNodeID.value = ''
+  copiedNodeID.value = ''
+  copyFailedNodeID.value = ''
+}
+
+async function writeTextToClipboard(text: string): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  if (typeof document === 'undefined') {
+    throw new Error('Clipboard API unavailable.')
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '0'
+  textarea.style.left = '-9999px'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  if (!copied) {
+    throw new Error('Failed to copy startup command.')
+  }
+}
+
+async function copyWorkerStartupCommand(nodeID: string): Promise<void> {
+  if (!nodeID || copyingNodeID.value === nodeID) {
+    return
+  }
+
+  if (copyFeedbackTimer) {
+    clearTimeout(copyFeedbackTimer)
+    copyFeedbackTimer = null
+  }
+  copiedNodeID.value = ''
+  copyFailedNodeID.value = ''
+  errorMessage.value = ''
+
+  copyingNodeID.value = nodeID
+  try {
+    const command = await fetchWorkerStartupCommand(nodeID)
+    await writeTextToClipboard(command)
+    copiedNodeID.value = nodeID
+    scheduleCopyFeedbackReset()
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      switchToUnauthenticatedState()
+      return
+    }
+    copyFailedNodeID.value = nodeID
+    errorMessage.value = error instanceof Error ? error.message : 'Failed to copy startup command.'
+    scheduleCopyFeedbackReset()
+  } finally {
+    if (copyingNodeID.value === nodeID) {
+      copyingNodeID.value = ''
+    }
+  }
 }
 
 function parseTimestamp(value: string): Date | null {
@@ -417,6 +559,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   activeController?.abort()
   stopAutoRefresh()
+  resetCopyFeedback()
 })
 </script>
 
@@ -538,11 +681,12 @@ onBeforeUnmount(() => {
                   <th>Status</th>
                   <th>Registered</th>
                   <th>Last Heartbeat</th>
+                  <th>Startup</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-if="!loading && workerRows.length === 0">
-                  <td colspan="7" class="empty-cell">No workers found in current filter.</td>
+                  <td colspan="8" class="empty-cell">No workers found in current filter.</td>
                 </tr>
                 <tr v-for="worker in workerRows" :key="worker.node_id">
                   <td>
@@ -557,6 +701,16 @@ onBeforeUnmount(() => {
                   </td>
                   <td>{{ formatDateTime(worker.registered_at) }}</td>
                   <td>{{ formatAge(worker.last_seen_at) }}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="ghost-btn small"
+                      :disabled="copyingNodeID === worker.node_id"
+                      @click="copyWorkerStartupCommand(worker.node_id)"
+                    >
+                      {{ startupCopyButtonText(worker.node_id) }}
+                    </button>
+                  </td>
                 </tr>
               </tbody>
             </table>

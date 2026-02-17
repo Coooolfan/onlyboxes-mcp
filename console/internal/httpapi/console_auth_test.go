@@ -77,7 +77,7 @@ func TestResolveDashboardCredentials(t *testing.T) {
 }
 
 func TestConsoleAuthLoginLogoutLifecycle(t *testing.T) {
-	handler := NewWorkerHandler(registry.NewStore(), 15*time.Second, nil)
+	handler := NewWorkerHandler(registry.NewStore(), 15*time.Second, nil, nil, "")
 	auth := newTestConsoleAuth(t)
 	router := NewRouter(handler, auth)
 
@@ -117,7 +117,7 @@ func TestConsoleAuthLoginLogoutLifecycle(t *testing.T) {
 }
 
 func TestConsoleAuthSessionExpires(t *testing.T) {
-	handler := NewWorkerHandler(registry.NewStore(), 15*time.Second, nil)
+	handler := NewWorkerHandler(registry.NewStore(), 15*time.Second, nil, nil, "")
 	auth := newTestConsoleAuth(t)
 	now := time.Unix(1_700_000_000, 0)
 	auth.nowFn = func() time.Time {

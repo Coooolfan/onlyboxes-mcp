@@ -64,7 +64,13 @@ func main() {
 		cfg.ReplayWindow,
 	)
 	grpcSrv := grpcserver.NewServer(registryService)
-	httpHandler := httpapi.NewWorkerHandler(store, cfg.OfflineTTL, registryService)
+	httpHandler := httpapi.NewWorkerHandler(
+		store,
+		cfg.OfflineTTL,
+		registryService,
+		secretByWorkerID,
+		cfg.GRPCAddr,
+	)
 	consoleAuth := httpapi.NewConsoleAuth(dashboardCredentials)
 	httpSrv := &http.Server{
 		Addr:    cfg.HTTPAddr,

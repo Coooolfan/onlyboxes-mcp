@@ -58,6 +58,15 @@ function unauthorizedResponse() {
   }
 }
 
+function errorResponse(status: number, statusText: string, error: string) {
+  return {
+    ok: false,
+    status,
+    statusText,
+    json: async () => ({ error }),
+  }
+}
+
 describe('App', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -192,6 +201,117 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Sign In to Control Panel')
     expect(wrapper.text()).not.toContain('API 401')
 
+    wrapper.unmount()
+  })
+
+  it('copies startup command after login', async () => {
+    let authenticated = false
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+
+    const startupCommand =
+      'WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 WORKER_ID=node-1 WORKER_SECRET=secret-1 WORKER_HEARTBEAT_INTERVAL_SEC=5 WORKER_HEARTBEAT_JITTER_PCT=20 go run ./cmd/worker-docker'
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/v1/console/login') {
+        authenticated = true
+        return jsonResponse({ authenticated: true })
+      }
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return authenticated ? jsonResponse(statsPayload) : unauthorizedResponse()
+      }
+      if (url.startsWith('/api/v1/workers?')) {
+        return authenticated ? jsonResponse(workersPayload) : unauthorizedResponse()
+      }
+      if (url === '/api/v1/workers/node-1/startup-command') {
+        return authenticated
+          ? jsonResponse({ node_id: 'node-1', command: startupCommand })
+          : unauthorizedResponse()
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    await wrapper.get('#dashboard-username').setValue('admin-test')
+    await wrapper.get('#dashboard-password').setValue('password-test')
+    await wrapper.get('form.login-form').trigger('submit.prevent')
+    await flushPromises()
+
+    const copyBtn = wrapper.findAll('button').find((button) => button.text() === 'Copy Start Cmd')
+    expect(copyBtn).toBeTruthy()
+    await copyBtn?.trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalledWith(startupCommand)
+    expect(wrapper.text()).toContain('Copied')
+
+    const startupCall = fetchMock.mock.calls.find(([url]) => String(url) === '/api/v1/workers/node-1/startup-command')
+    expect(startupCall?.[1]).toEqual(expect.objectContaining({ credentials: 'same-origin' }))
+
+    wrapper.unmount()
+  })
+
+  it('returns to login when startup command fetch receives 401', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers?')) {
+        return jsonResponse(workersPayload)
+      }
+      if (url === '/api/v1/workers/node-1/startup-command') {
+        return unauthorizedResponse()
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const copyBtn = wrapper.findAll('button').find((button) => button.text() === 'Copy Start Cmd')
+    expect(copyBtn).toBeTruthy()
+    await copyBtn?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Sign In to Control Panel')
+    wrapper.unmount()
+  })
+
+  it('shows API error when startup command fetch fails', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers?')) {
+        return jsonResponse(workersPayload)
+      }
+      if (url === '/api/v1/workers/node-1/startup-command') {
+        return errorResponse(500, 'Internal Server Error', 'failed to build startup command')
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const copyBtn = wrapper.findAll('button').find((button) => button.text() === 'Copy Start Cmd')
+    expect(copyBtn).toBeTruthy()
+    await copyBtn?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('failed to build startup command')
+    expect(wrapper.text()).toContain('Copy Failed')
     wrapper.unmount()
   })
 })

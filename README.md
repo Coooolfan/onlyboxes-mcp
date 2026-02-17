@@ -63,7 +63,13 @@ curl -c /tmp/onlyboxes-console.cookie -X POST "http://127.0.0.1:8089/api/v1/cons
 curl -b /tmp/onlyboxes-console.cookie "http://127.0.0.1:8089/api/v1/workers?page=1&page_size=20&status=all"
 ```
 
-5. 调用 echo 命令链路（阻塞等待 worker 返回，执行类接口无需登录）：
+5. 一键复制场景对应的接口：按 worker 获取启动命令（接口需登录，响应仅返回命令文本）：
+
+```bash
+curl -b /tmp/onlyboxes-console.cookie "http://127.0.0.1:8089/api/v1/workers/<worker_id>/startup-command"
+```
+
+6. 调用 echo 命令链路（阻塞等待 worker 返回，执行类接口无需登录）：
 
 ```bash
 curl -X POST "http://127.0.0.1:8089/api/v1/commands/echo" \
@@ -79,7 +85,7 @@ curl -X POST "http://127.0.0.1:8089/api/v1/commands/echo" \
 }
 ```
 
-6. 提交通用任务（`mode=auto`，先等 `wait_ms`，未完成则返回 `202`）：
+7. 提交通用任务（`mode=auto`，先等 `wait_ms`，未完成则返回 `202`）：
 
 ```bash
 curl -X POST "http://127.0.0.1:8089/api/v1/tasks" \
@@ -87,7 +93,7 @@ curl -X POST "http://127.0.0.1:8089/api/v1/tasks" \
   -d '{"capability":"echo","input":{"message":"hello task"},"mode":"auto","wait_ms":1500,"timeout_ms":60000}'
 ```
 
-7. 查询任务状态：
+8. 查询任务状态：
 
 ```bash
 curl "http://127.0.0.1:8089/api/v1/tasks/<task_id>"

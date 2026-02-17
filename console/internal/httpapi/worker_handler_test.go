@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 
 func TestListWorkersEmpty(t *testing.T) {
 	store := registry.NewStore()
-	handler := NewWorkerHandler(store, 15*time.Second, nil)
+	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, "")
 	handler.nowFn = func() time.Time {
 		return time.Unix(1_700_000_000, 0)
 	}
@@ -49,7 +50,7 @@ func TestListWorkersPaginationAndFilter(t *testing.T) {
 	store.Upsert(&registryv1.ConnectHello{NodeId: "node-1", NodeName: "node-1"}, "session-1", base.Add(10*time.Second))
 	store.Upsert(&registryv1.ConnectHello{NodeId: "node-3", NodeName: "node-3"}, "session-3", base.Add(12*time.Second))
 
-	handler := NewWorkerHandler(store, 15*time.Second, nil)
+	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, "")
 	handler.nowFn = func() time.Time {
 		return base.Add(20 * time.Second)
 	}
@@ -95,7 +96,7 @@ func TestListWorkersPaginationAndFilter(t *testing.T) {
 
 func TestListWorkersRequiresAuthentication(t *testing.T) {
 	store := registry.NewStore()
-	handler := NewWorkerHandler(store, 15*time.Second, nil)
+	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers", nil)
@@ -104,5 +105,117 @@ func TestListWorkersRequiresAuthentication(t *testing.T) {
 
 	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestGetWorkerStartupCommandSuccess(t *testing.T) {
+	handler := NewWorkerHandler(
+		registry.NewStore(),
+		15*time.Second,
+		nil,
+		map[string]string{"node-copy-1": "secret-copy-1"},
+		":50051",
+	)
+	router := NewRouter(handler, newTestConsoleAuth(t))
+	cookie := loginSessionCookie(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/node-copy-1/startup-command", nil)
+	req.Host = "console.local:8089"
+	req.AddCookie(cookie)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", res.Code, res.Body.String())
+	}
+
+	var payload workerStartupCommandResponse
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if payload.NodeID != "node-copy-1" {
+		t.Fatalf("expected node_id node-copy-1, got %q", payload.NodeID)
+	}
+	if !strings.Contains(payload.Command, "WORKER_CONSOLE_GRPC_TARGET=console.local:50051") {
+		t.Fatalf("expected resolved grpc target in command, got %q", payload.Command)
+	}
+	if !strings.Contains(payload.Command, "WORKER_ID=node-copy-1") {
+		t.Fatalf("expected WORKER_ID in command, got %q", payload.Command)
+	}
+	if !strings.Contains(payload.Command, "WORKER_SECRET=secret-copy-1") {
+		t.Fatalf("expected WORKER_SECRET in command, got %q", payload.Command)
+	}
+	if !strings.Contains(payload.Command, "go run ./cmd/worker-docker") {
+		t.Fatalf("expected worker command tail, got %q", payload.Command)
+	}
+}
+
+func TestGetWorkerStartupCommandRequiresAuthentication(t *testing.T) {
+	handler := NewWorkerHandler(
+		registry.NewStore(),
+		15*time.Second,
+		nil,
+		map[string]string{"node-copy-1": "secret-copy-1"},
+		":50051",
+	)
+	router := NewRouter(handler, newTestConsoleAuth(t))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/node-copy-1/startup-command", nil)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestGetWorkerStartupCommandNotFound(t *testing.T) {
+	handler := NewWorkerHandler(
+		registry.NewStore(),
+		15*time.Second,
+		nil,
+		map[string]string{"node-copy-1": "secret-copy-1"},
+		":50051",
+	)
+	router := NewRouter(handler, newTestConsoleAuth(t))
+	cookie := loginSessionCookie(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/node-missing/startup-command", nil)
+	req.AddCookie(cookie)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestResolveWorkerGRPCTargetPortOnlyUsesRequestHost(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/node-copy-1/startup-command", nil)
+	req.Host = "panel.example.com:8089"
+
+	target := resolveWorkerGRPCTarget(":50051", req)
+	if target != "panel.example.com:50051" {
+		t.Fatalf("expected panel.example.com:50051, got %s", target)
+	}
+}
+
+func TestResolveWorkerGRPCTargetWildcardHostUsesRequestHost(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/node-copy-1/startup-command", nil)
+	req.Host = "panel.example.com:8089"
+
+	target := resolveWorkerGRPCTarget("0.0.0.0:50051", req)
+	if target != "panel.example.com:50051" {
+		t.Fatalf("expected panel.example.com:50051, got %s", target)
+	}
+}
+
+func TestResolveWorkerGRPCTargetFallbackHost(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/node-copy-1/startup-command", nil)
+	req.Host = ""
+
+	target := resolveWorkerGRPCTarget(":50051", req)
+	if target != "127.0.0.1:50051" {
+		t.Fatalf("expected 127.0.0.1:50051, got %s", target)
 	}
 }

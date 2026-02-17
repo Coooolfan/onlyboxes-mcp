@@ -26,7 +26,7 @@ func TestWorkerStatsAggregatesAllWorkers(t *testing.T) {
 		store.Upsert(&registryv1.ConnectHello{NodeId: fmt.Sprintf("offline-stale-%d", i)}, fmt.Sprintf("session-offline-b-%d", i), now.Add(-40*time.Second))
 	}
 
-	handler := NewWorkerHandler(store, 15*time.Second, nil)
+	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, "")
 	handler.nowFn = func() time.Time {
 		return now
 	}
@@ -70,7 +70,7 @@ func TestWorkerStatsSupportsCustomStaleThreshold(t *testing.T) {
 	store.Upsert(&registryv1.ConnectHello{NodeId: "old-a"}, "session-old-a", now.Add(-20*time.Second))
 	store.Upsert(&registryv1.ConnectHello{NodeId: "old-b"}, "session-old-b", now.Add(-40*time.Second))
 
-	handler := NewWorkerHandler(store, 15*time.Second, nil)
+	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, "")
 	handler.nowFn = func() time.Time {
 		return now
 	}
@@ -100,7 +100,7 @@ func TestWorkerStatsSupportsCustomStaleThreshold(t *testing.T) {
 
 func TestWorkerStatsRejectsInvalidStaleThreshold(t *testing.T) {
 	store := registry.NewStore()
-	handler := NewWorkerHandler(store, 15*time.Second, nil)
+	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 	cookie := loginSessionCookie(t, router)
 

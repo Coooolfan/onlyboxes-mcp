@@ -5,6 +5,7 @@ The console service hosts:
 - REST APIs for worker data (dashboard, authentication required):
   - `GET /api/v1/workers` for paginated worker listing.
   - `GET /api/v1/workers/stats` for aggregated worker status metrics.
+  - `GET /api/v1/workers/:node_id/startup-command` for on-demand copy of a worker startup command (includes `WORKER_ID` + `WORKER_SECRET` in command text only).
 - command APIs (execution, no authentication required):
   - `POST /api/v1/commands/echo` for blocking echo command execution.
   - `POST /api/v1/tasks` for sync/async/auto task submission.

@@ -57,7 +57,7 @@ func TestSubmitTaskAccepted(t *testing.T) {
 		cancel: func(taskID string) (grpcserver.TaskSnapshot, error) {
 			return grpcserver.TaskSnapshot{}, nil
 		},
-	})
+	}, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"capability":"echo","input":{"message":"hello"},"mode":"async"}`))
@@ -98,7 +98,7 @@ func TestSubmitTaskCompletedSuccess(t *testing.T) {
 		cancel: func(taskID string) (grpcserver.TaskSnapshot, error) {
 			return grpcserver.TaskSnapshot{}, nil
 		},
-	})
+	}, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"capability":"echo","input":{"message":"hello"},"mode":"sync"}`))
@@ -125,7 +125,7 @@ func TestSubmitTaskNoCapacity(t *testing.T) {
 		cancel: func(taskID string) (grpcserver.TaskSnapshot, error) {
 			return grpcserver.TaskSnapshot{}, nil
 		},
-	})
+	}, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"capability":"echo","input":{"message":"hello"}}`))
@@ -149,7 +149,7 @@ func TestSubmitTaskRequestInProgress(t *testing.T) {
 		cancel: func(taskID string) (grpcserver.TaskSnapshot, error) {
 			return grpcserver.TaskSnapshot{}, nil
 		},
-	})
+	}, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"capability":"echo","input":{"message":"hello"},"request_id":"req-1"}`))
@@ -187,7 +187,7 @@ func TestGetTask(t *testing.T) {
 		cancel: func(taskID string) (grpcserver.TaskSnapshot, error) {
 			return grpcserver.TaskSnapshot{}, nil
 		},
-	})
+	}, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/task-3", nil)
@@ -227,7 +227,7 @@ func TestCancelTaskTerminalConflict(t *testing.T) {
 				CompletedAt: &completed,
 			}, grpcserver.ErrTaskTerminal
 		},
-	})
+	}, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/task-5/cancel", nil)

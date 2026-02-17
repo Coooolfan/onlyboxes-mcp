@@ -43,7 +43,7 @@ func TestRegisterAndListLifecycle(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	handler := NewWorkerHandler(store, 15*time.Second, registrySvc)
+	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, map[string]string{workerID: workerSecret}, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
@@ -153,7 +153,7 @@ func TestEchoCommandLifecycle(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	handler := NewWorkerHandler(store, 15*time.Second, registrySvc)
+	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, map[string]string{workerID: workerSecret}, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
@@ -264,7 +264,7 @@ func TestTaskLifecycleSync(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	handler := NewWorkerHandler(store, 15*time.Second, registrySvc)
+	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, map[string]string{workerID: workerSecret}, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t))
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
