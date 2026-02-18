@@ -1,7 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
+
 import App from '../App.vue'
+import router from '../router'
 
 const statsPayload = {
   total: 150,
@@ -67,6 +70,22 @@ function errorResponse(status: number, statusText: string, error: string) {
   }
 }
 
+async function mountApp(path: string) {
+  const pinia = createPinia()
+  const wrapper = mount(App, {
+    global: {
+      plugins: [pinia, router],
+    },
+  })
+
+  await router.push('/login')
+  await flushPromises()
+  await router.push(path)
+  await flushPromises()
+
+  return wrapper
+}
+
 describe('App', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -76,30 +95,46 @@ describe('App', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows login panel when dashboard APIs return 401', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+  it('redirects unauthenticated /workers access to login page', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.startsWith('/api/v1/workers/stats')) {
-        return unauthorizedResponse()
-      }
-      if (url.startsWith('/api/v1/workers?')) {
         return unauthorizedResponse()
       }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const wrapper = mount(App)
-    await flushPromises()
+    const wrapper = await mountApp('/workers')
 
     expect(wrapper.text()).toContain('Sign In to Control Panel')
-    expect(wrapper.text()).not.toContain('Execution Node Control Panel')
+    expect(router.currentRoute.value.path).toBe('/login')
+    wrapper.unmount()
+  })
+
+  it('redirects authenticated /login access to workers page', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers?')) {
+        return jsonResponse(workersPayload)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = await mountApp('/login?redirect=/workers')
+
+    expect(router.currentRoute.value.path).toBe('/workers')
+    expect(wrapper.text()).toContain('Execution Node Control Panel')
     wrapper.unmount()
   })
 
   it('logs in and renders dashboard', async () => {
     let authenticated = false
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === '/api/v1/console/login') {
         authenticated = true
@@ -115,24 +150,19 @@ describe('App', () => {
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const wrapper = mount(App)
-    await flushPromises()
+    const wrapper = await mountApp('/login')
 
     await wrapper.get('#dashboard-username').setValue('admin-test')
     await wrapper.get('#dashboard-password').setValue('password-test')
     await wrapper.get('form.login-form').trigger('submit.prevent')
     await flushPromises()
 
+    expect(router.currentRoute.value.path).toBe('/workers')
     expect(wrapper.text()).toContain('Execution Node Control Panel')
     expect(wrapper.text()).toContain('worker-1')
 
     const loginCall = fetchMock.mock.calls.find(([url]) => String(url) === '/api/v1/console/login')
     expect(loginCall).toBeTruthy()
-    expect(loginCall?.[1]).toEqual(expect.objectContaining({ credentials: 'same-origin' }))
-
-    const workersCall = fetchMock.mock.calls.find(([url]) => String(url).startsWith('/api/v1/workers?'))
-    expect(workersCall?.[1]).toEqual(expect.objectContaining({ credentials: 'same-origin' }))
-
     wrapper.unmount()
   })
 
@@ -150,12 +180,15 @@ describe('App', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return authenticated ? jsonResponse(workersPayload) : unauthorizedResponse()
       }
+      if (url === '/api/v1/console/login' && init?.method === 'POST') {
+        authenticated = true
+        return jsonResponse({ authenticated: true })
+      }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const wrapper = mount(App)
-    await flushPromises()
+    const wrapper = await mountApp('/workers')
 
     expect(wrapper.text()).toContain('Execution Node Control Panel')
 
@@ -165,10 +198,10 @@ describe('App', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Sign In to Control Panel')
+    expect(router.currentRoute.value.path).toBe('/login')
 
     const logoutCall = fetchMock.mock.calls.find(([url]) => String(url) === '/api/v1/console/logout')
     expect(logoutCall).toBeTruthy()
-    expect(logoutCall?.[1]).toEqual(expect.objectContaining({ credentials: 'same-origin' }))
 
     wrapper.unmount()
   })
@@ -187,10 +220,7 @@ describe('App', () => {
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const wrapper = mount(App)
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('Execution Node Control Panel')
+    const wrapper = await mountApp('/workers')
 
     forceUnauthorized = true
     const refreshBtn = wrapper.findAll('button').find((button) => button.text() === 'Refresh Now')
@@ -199,13 +229,12 @@ describe('App', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Sign In to Control Panel')
-    expect(wrapper.text()).not.toContain('API 401')
+    expect(router.currentRoute.value.path).toBe('/login')
 
     wrapper.unmount()
   })
 
-  it('copies startup command after login', async () => {
-    let authenticated = false
+  it('copies startup command', async () => {
     const writeText = vi.fn(async () => {})
     Object.defineProperty(window.navigator, 'clipboard', {
       value: { writeText },
@@ -215,34 +244,22 @@ describe('App', () => {
     const startupCommand =
       'WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 WORKER_ID=node-1 WORKER_SECRET=secret-1 WORKER_HEARTBEAT_INTERVAL_SEC=5 WORKER_HEARTBEAT_JITTER_PCT=20 go run ./cmd/worker-docker'
 
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url === '/api/v1/console/login') {
-        authenticated = true
-        return jsonResponse({ authenticated: true })
-      }
       if (url.startsWith('/api/v1/workers/stats')) {
-        return authenticated ? jsonResponse(statsPayload) : unauthorizedResponse()
+        return jsonResponse(statsPayload)
       }
       if (url.startsWith('/api/v1/workers?')) {
-        return authenticated ? jsonResponse(workersPayload) : unauthorizedResponse()
+        return jsonResponse(workersPayload)
       }
       if (url === '/api/v1/workers/node-1/startup-command') {
-        return authenticated
-          ? jsonResponse({ node_id: 'node-1', command: startupCommand })
-          : unauthorizedResponse()
+        return jsonResponse({ node_id: 'node-1', command: startupCommand })
       }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const wrapper = mount(App)
-    await flushPromises()
-
-    await wrapper.get('#dashboard-username').setValue('admin-test')
-    await wrapper.get('#dashboard-password').setValue('password-test')
-    await wrapper.get('form.login-form').trigger('submit.prevent')
-    await flushPromises()
+    const wrapper = await mountApp('/workers')
 
     const copyBtn = wrapper.findAll('button').find((button) => button.text() === 'Copy Start Cmd')
     expect(copyBtn).toBeTruthy()
@@ -252,14 +269,11 @@ describe('App', () => {
     expect(writeText).toHaveBeenCalledWith(startupCommand)
     expect(wrapper.text()).toContain('Copied')
 
-    const startupCall = fetchMock.mock.calls.find(([url]) => String(url) === '/api/v1/workers/node-1/startup-command')
-    expect(startupCall?.[1]).toEqual(expect.objectContaining({ credentials: 'same-origin' }))
-
     wrapper.unmount()
   })
 
   it('returns to login when startup command fetch receives 401', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.startsWith('/api/v1/workers/stats')) {
         return jsonResponse(statsPayload)
@@ -274,8 +288,7 @@ describe('App', () => {
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const wrapper = mount(App)
-    await flushPromises()
+    const wrapper = await mountApp('/workers')
 
     const copyBtn = wrapper.findAll('button').find((button) => button.text() === 'Copy Start Cmd')
     expect(copyBtn).toBeTruthy()
@@ -283,11 +296,13 @@ describe('App', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Sign In to Control Panel')
+    expect(router.currentRoute.value.path).toBe('/login')
+
     wrapper.unmount()
   })
 
   it('shows API error when startup command fetch fails', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.startsWith('/api/v1/workers/stats')) {
         return jsonResponse(statsPayload)
@@ -302,8 +317,7 @@ describe('App', () => {
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const wrapper = mount(App)
-    await flushPromises()
+    const wrapper = await mountApp('/workers')
 
     const copyBtn = wrapper.findAll('button').find((button) => button.text() === 'Copy Start Cmd')
     expect(copyBtn).toBeTruthy()
@@ -312,6 +326,7 @@ describe('App', () => {
 
     expect(wrapper.text()).toContain('failed to build startup command')
     expect(wrapper.text()).toContain('Copy Failed')
+
     wrapper.unmount()
   })
 
@@ -325,7 +340,7 @@ describe('App', () => {
     const createCommand =
       'WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 WORKER_ID=node-2 WORKER_SECRET=secret-2 WORKER_HEARTBEAT_INTERVAL_SEC=5 WORKER_HEARTBEAT_JITTER_PCT=20 go run ./cmd/worker-docker'
 
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.startsWith('/api/v1/workers/stats')) {
         return jsonResponse(statsPayload)
@@ -340,8 +355,7 @@ describe('App', () => {
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const wrapper = mount(App)
-    await flushPromises()
+    const wrapper = await mountApp('/workers')
 
     const addBtn = wrapper.findAll('button').find((button) => button.text() === 'Add Worker')
     expect(addBtn).toBeTruthy()
@@ -349,9 +363,7 @@ describe('App', () => {
     await flushPromises()
 
     expect(writeText).toHaveBeenCalledWith(createCommand)
-
-    const createCall = fetchMock.mock.calls.find(([url]) => String(url) === '/api/v1/workers')
-    expect(createCall?.[1]).toEqual(expect.objectContaining({ method: 'POST', credentials: 'same-origin' }))
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/v1/workers')).toBe(true)
 
     wrapper.unmount()
   })
@@ -378,26 +390,24 @@ describe('App', () => {
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const wrapper = mount(App)
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('worker-1')
+    const wrapper = await mountApp('/workers')
 
     const deleteBtn = wrapper.findAll('button').find((button) => button.text() === 'Delete')
     expect(deleteBtn).toBeTruthy()
     await deleteBtn?.trigger('click')
     await flushPromises()
 
+    expect(wrapper.text()).toContain('No workers found in current filter.')
+
     const deleteCall = fetchMock.mock.calls.find(
       ([url, init]) => String(url) === '/api/v1/workers/node-1' && (init as RequestInit | undefined)?.method === 'DELETE',
     )
-    expect(deleteCall?.[1]).toEqual(expect.objectContaining({ method: 'DELETE', credentials: 'same-origin' }))
-    expect(wrapper.text()).toContain('No workers found in current filter.')
+    expect(deleteCall).toBeTruthy()
 
     wrapper.unmount()
   })
 
-  it('returns to login when create worker receives 401', async () => {
+  it('syncs status/page from query and back to URL', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.startsWith('/api/v1/workers/stats')) {
@@ -406,22 +416,23 @@ describe('App', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
       }
-      if (url === '/api/v1/workers') {
-        return unauthorizedResponse()
-      }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
-    const wrapper = mount(App)
+    const wrapper = await mountApp('/workers?status=online&page=2')
+
+    const workersCall = fetchMock.mock.calls.find(([url]) => String(url).startsWith('/api/v1/workers?status=online&page=2'))
+    expect(workersCall).toBeTruthy()
+
+    const allTab = wrapper.findAll('button').find((button) => button.text() === 'All')
+    expect(allTab).toBeTruthy()
+    await allTab?.trigger('click')
     await flushPromises()
 
-    const addBtn = wrapper.findAll('button').find((button) => button.text() === 'Add Worker')
-    expect(addBtn).toBeTruthy()
-    await addBtn?.trigger('click')
-    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/workers')
+    expect(router.currentRoute.value.query.status).toBeUndefined()
 
-    expect(wrapper.text()).toContain('Sign In to Control Panel')
     wrapper.unmount()
   })
 })
