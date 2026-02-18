@@ -76,18 +76,23 @@ func NewWorkerHandler(
 	}
 }
 
-func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth) *gin.Engine {
+func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *MCPAuth) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Any("/mcp", gin.WrapH(NewMCPHandler(workerHandler.dispatcher)))
+	if mcpAuth == nil {
+		mcpAuth = NewMCPAuth(nil)
+	}
+	router.Any("/mcp", mcpAuth.RequireToken(), gin.WrapH(NewMCPHandler(workerHandler.dispatcher)))
 
 	api := router.Group("/api/v1")
-	api.POST("/commands/echo", workerHandler.EchoCommand)
-	api.POST("/commands/terminal", workerHandler.TerminalCommand)
-	api.POST("/tasks", workerHandler.SubmitTask)
-	api.GET("/tasks/:task_id", workerHandler.GetTask)
-	api.POST("/tasks/:task_id/cancel", workerHandler.CancelTask)
+	execAPI := api.Group("/")
+	execAPI.Use(mcpAuth.RequireToken())
+	execAPI.POST("/commands/echo", workerHandler.EchoCommand)
+	execAPI.POST("/commands/terminal", workerHandler.TerminalCommand)
+	execAPI.POST("/tasks", workerHandler.SubmitTask)
+	execAPI.GET("/tasks/:task_id", workerHandler.GetTask)
+	execAPI.POST("/tasks/:task_id/cancel", workerHandler.CancelTask)
 
 	if consoleAuth == nil {
 		api.GET("/workers", workerHandler.ListWorkers)
@@ -107,6 +112,7 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth) *gin.Engi
 	dashboard.POST("/workers", workerHandler.CreateWorker)
 	dashboard.DELETE("/workers/:node_id", workerHandler.DeleteWorker)
 	dashboard.GET("/workers/:node_id/startup-command", workerHandler.GetWorkerStartupCommand)
+	dashboard.GET("/console/mcp/tokens", mcpAuth.ListTokens)
 
 	return router
 }

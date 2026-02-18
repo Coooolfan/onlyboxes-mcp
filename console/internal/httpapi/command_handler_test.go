@@ -48,11 +48,13 @@ func TestEchoCommandSuccess(t *testing.T) {
 		},
 	}
 	handler := NewWorkerHandler(store, 15*time.Second, dispatcher, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -70,15 +72,37 @@ func TestEchoCommandRejectsInvalidInput(t *testing.T) {
 			return message, nil
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"   ","timeout_ms":0}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEchoCommandRequiresMCPToken(t *testing.T) {
+	store := registry.NewStore()
+	dispatcher := &fakeEchoDispatcher{
+		dispatch: func(ctx context.Context, message string, timeout time.Duration) (string, error) {
+			return message, nil
+		},
+	}
+	handler := NewWorkerHandler(store, 15*time.Second, dispatcher, nil, "")
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -89,11 +113,13 @@ func TestEchoCommandMapsNoWorkerError(t *testing.T) {
 			return "", grpcserver.ErrNoEchoWorker
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello","timeout_ms":1000}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusServiceUnavailable {
@@ -108,11 +134,13 @@ func TestEchoCommandMapsCapacityError(t *testing.T) {
 			return "", grpcserver.ErrNoWorkerCapacity
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello","timeout_ms":1000}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusTooManyRequests {
@@ -127,11 +155,13 @@ func TestEchoCommandMapsTimeoutError(t *testing.T) {
 			return "", grpcserver.ErrEchoTimeout
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello","timeout_ms":1000}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusGatewayTimeout {
@@ -149,11 +179,13 @@ func TestEchoCommandMapsExecutionError(t *testing.T) {
 			}
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello","timeout_ms":1000}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadGateway {
@@ -199,11 +231,13 @@ func TestTerminalCommandSuccess(t *testing.T) {
 			}, nil
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/terminal", strings.NewReader(`{"command":"pwd","create_if_missing":true}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -248,11 +282,13 @@ func TestTerminalCommandStatusMappings(t *testing.T) {
 					}, nil
 				},
 			}, nil, "")
-			router := NewRouter(handler, newTestConsoleAuth(t))
+			router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/terminal", strings.NewReader(`{"command":"pwd"}`))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
+			setMCPTokenHeader(req)
+
 			router.ServeHTTP(rec, req)
 
 			if rec.Code != tc.statusCode {
@@ -269,11 +305,13 @@ func TestTerminalCommandRejectsInvalidInput(t *testing.T) {
 			return message, nil
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/terminal", strings.NewReader(`{"command":"   ","timeout_ms":0}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {

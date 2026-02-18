@@ -11,6 +11,7 @@ import (
 const (
 	testDashboardUsername = "admin-test"
 	testDashboardPassword = "password-test"
+	testMCPToken          = "mcp-token-test"
 )
 
 func newTestConsoleAuth(t *testing.T) *ConsoleAuth {
@@ -19,6 +20,17 @@ func newTestConsoleAuth(t *testing.T) *ConsoleAuth {
 		Username: testDashboardUsername,
 		Password: testDashboardPassword,
 	})
+}
+
+func newTestMCPAuth() *MCPAuth {
+	return NewMCPAuth([]string{testMCPToken})
+}
+
+func setMCPTokenHeader(req *http.Request) {
+	if req == nil {
+		return
+	}
+	req.Header.Set(mcpTokenHeader, testMCPToken)
 }
 
 func loginSessionCookie(t *testing.T, router http.Handler) *http.Cookie {

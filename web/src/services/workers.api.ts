@@ -1,5 +1,6 @@
 import { parseAPIError, request } from '@/services/http'
 import type {
+  MCPTokenListResponse,
   WorkerListResponse,
   WorkerStartupCommandResponse,
   WorkerStatsResponse,
@@ -106,5 +107,18 @@ export async function deleteWorkerAPI(nodeID: string): Promise<void> {
 
   if (!response.ok) {
     throw new Error(await parseAPIError(response))
+  }
+}
+
+export async function fetchMcpTokensAPI(signal: AbortSignal): Promise<MCPTokenListResponse> {
+  const response = await request('/api/v1/console/mcp/tokens', { signal })
+  if (!response.ok) {
+    throw new Error(await parseAPIError(response))
+  }
+
+  const payload = (await response.json()) as MCPTokenListResponse
+  return {
+    tokens: payload.tokens ?? [],
+    total: payload.total ?? 0,
   }
 }

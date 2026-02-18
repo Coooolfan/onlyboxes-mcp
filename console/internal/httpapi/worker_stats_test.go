@@ -30,7 +30,7 @@ func TestWorkerStatsAggregatesAllWorkers(t *testing.T) {
 	handler.nowFn = func() time.Time {
 		return now
 	}
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	cookie := loginSessionCookie(t, router)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/stats", nil)
@@ -74,7 +74,7 @@ func TestWorkerStatsSupportsCustomStaleThreshold(t *testing.T) {
 	handler.nowFn = func() time.Time {
 		return now
 	}
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	cookie := loginSessionCookie(t, router)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/stats?stale_after_sec=10", nil)
@@ -101,7 +101,7 @@ func TestWorkerStatsSupportsCustomStaleThreshold(t *testing.T) {
 func TestWorkerStatsRejectsInvalidStaleThreshold(t *testing.T) {
 	store := registry.NewStore()
 	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	cookie := loginSessionCookie(t, router)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/stats?stale_after_sec=0", nil)

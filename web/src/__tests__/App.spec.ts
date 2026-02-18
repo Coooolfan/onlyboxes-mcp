@@ -34,6 +34,11 @@ const workersPayload = {
   page_size: 25,
 }
 
+const mcpTokensPayload = {
+  tokens: ['mcp-token-1'],
+  total: 1,
+}
+
 function jsonResponse(payload: unknown) {
   return {
     ok: true,
@@ -101,6 +106,12 @@ describe('App', () => {
       if (url.startsWith('/api/v1/workers/stats')) {
         return unauthorizedResponse()
       }
+      if (url.startsWith('/api/v1/workers?')) {
+        return unauthorizedResponse()
+      }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return unauthorizedResponse()
+      }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
@@ -120,6 +131,9 @@ describe('App', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
+      }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return jsonResponse(mcpTokensPayload)
       }
       throw new Error(`unexpected url: ${url}`)
     })
@@ -146,6 +160,9 @@ describe('App', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return authenticated ? jsonResponse(workersPayload) : unauthorizedResponse()
       }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return authenticated ? jsonResponse(mcpTokensPayload) : unauthorizedResponse()
+      }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
@@ -166,6 +183,40 @@ describe('App', () => {
     wrapper.unmount()
   })
 
+  it('shows mcp tokens and copies token', async () => {
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers?')) {
+        return jsonResponse(workersPayload)
+      }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return jsonResponse(mcpTokensPayload)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = await mountApp('/workers')
+
+    expect(wrapper.text()).toContain('mcp-token-1')
+    const copyTokenBtn = wrapper.findAll('button').find((button) => button.text() === 'Copy Token')
+    expect(copyTokenBtn).toBeTruthy()
+    await copyTokenBtn?.trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalledWith('mcp-token-1')
+    wrapper.unmount()
+  })
+
   it('logs out and returns to login panel', async () => {
     let authenticated = true
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -179,6 +230,9 @@ describe('App', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return authenticated ? jsonResponse(workersPayload) : unauthorizedResponse()
+      }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return authenticated ? jsonResponse(mcpTokensPayload) : unauthorizedResponse()
       }
       if (url === '/api/v1/console/login' && init?.method === 'POST') {
         authenticated = true
@@ -216,6 +270,9 @@ describe('App', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return forceUnauthorized ? unauthorizedResponse() : jsonResponse(workersPayload)
       }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return forceUnauthorized ? unauthorizedResponse() : jsonResponse(mcpTokensPayload)
+      }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
@@ -252,6 +309,9 @@ describe('App', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
       }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return jsonResponse(mcpTokensPayload)
+      }
       if (url === '/api/v1/workers/node-1/startup-command') {
         return jsonResponse({ node_id: 'node-1', command: startupCommand })
       }
@@ -281,6 +341,9 @@ describe('App', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
       }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return jsonResponse(mcpTokensPayload)
+      }
       if (url === '/api/v1/workers/node-1/startup-command') {
         return unauthorizedResponse()
       }
@@ -309,6 +372,9 @@ describe('App', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
+      }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return jsonResponse(mcpTokensPayload)
       }
       if (url === '/api/v1/workers/node-1/startup-command') {
         return errorResponse(500, 'Internal Server Error', 'failed to build startup command')
@@ -348,6 +414,9 @@ describe('App', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
       }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return jsonResponse(mcpTokensPayload)
+      }
       if (url === '/api/v1/workers') {
         return jsonResponse({ node_id: 'node-2', command: createCommand })
       }
@@ -382,6 +451,9 @@ describe('App', () => {
           ? jsonResponse({ items: [], total: 0, page: 1, page_size: 25 })
           : jsonResponse(workersPayload)
       }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return jsonResponse(mcpTokensPayload)
+      }
       if (url === '/api/v1/workers/node-1' && init?.method === 'DELETE') {
         deleted = true
         return noContentResponse()
@@ -415,6 +487,9 @@ describe('App', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
+      }
+      if (url === '/api/v1/console/mcp/tokens') {
+        return jsonResponse(mcpTokensPayload)
       }
       throw new Error(`unexpected url: ${url}`)
     })

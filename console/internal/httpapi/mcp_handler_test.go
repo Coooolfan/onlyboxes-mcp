@@ -835,6 +835,7 @@ func TestMCPGetReturnsMethodNotAllowed(t *testing.T) {
 	router := newMCPTestRouter(t, &fakeMCPDispatcher{})
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
 	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set(mcpTokenHeader, testMCPToken)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -846,11 +847,24 @@ func TestMCPGetReturnsMethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestMCPPostRequiresToken(t *testing.T) {
+	router := newMCPTestRouter(t, &fakeMCPDispatcher{})
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func newMCPTestRouter(t *testing.T, dispatcher CommandDispatcher) http.Handler {
 	t.Helper()
 
 	handler := NewWorkerHandler(registry.NewStore(), 15*time.Second, dispatcher, nil, "")
-	return NewRouter(handler, newTestConsoleAuth(t))
+	return NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 }
 
 func mcpPostJSON(t *testing.T, router http.Handler, body string) map[string]any {
@@ -859,6 +873,7 @@ func mcpPostJSON(t *testing.T, router http.Handler, body string) map[string]any 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set(mcpTokenHeader, testMCPToken)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 

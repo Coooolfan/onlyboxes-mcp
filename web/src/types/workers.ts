@@ -36,3 +36,8 @@ export interface WorkerStartupCommandResponse {
   node_id: string
   command: string
 }
+
+export interface MCPTokenListResponse {
+  tokens: string[]
+  total: number
+}

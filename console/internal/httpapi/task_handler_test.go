@@ -58,11 +58,13 @@ func TestSubmitTaskAccepted(t *testing.T) {
 			return grpcserver.TaskSnapshot{}, nil
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"capability":"echo","input":{"message":"hello"},"mode":"async"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusAccepted {
@@ -99,11 +101,13 @@ func TestSubmitTaskCompletedSuccess(t *testing.T) {
 			return grpcserver.TaskSnapshot{}, nil
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"capability":"echo","input":{"message":"hello"},"mode":"sync"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -111,6 +115,30 @@ func TestSubmitTaskCompletedSuccess(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"status":"succeeded"`) {
 		t.Fatalf("expected succeeded status, got %s", rec.Body.String())
+	}
+}
+
+func TestSubmitTaskRequiresMCPToken(t *testing.T) {
+	handler := NewWorkerHandler(registry.NewStore(), 15*time.Second, &fakeTaskDispatcher{
+		submit: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
+			return grpcserver.SubmitTaskResult{}, nil
+		},
+		get: func(taskID string) (grpcserver.TaskSnapshot, bool) {
+			return grpcserver.TaskSnapshot{}, false
+		},
+		cancel: func(taskID string) (grpcserver.TaskSnapshot, error) {
+			return grpcserver.TaskSnapshot{}, nil
+		},
+	}, nil, "")
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"capability":"echo","input":{"message":"hello"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -126,11 +154,13 @@ func TestSubmitTaskNoCapacity(t *testing.T) {
 			return grpcserver.TaskSnapshot{}, nil
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"capability":"echo","input":{"message":"hello"}}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusTooManyRequests {
@@ -150,11 +180,13 @@ func TestSubmitTaskRequestInProgress(t *testing.T) {
 			return grpcserver.TaskSnapshot{}, nil
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"capability":"echo","input":{"message":"hello"},"request_id":"req-1"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusConflict {
@@ -188,10 +220,12 @@ func TestGetTask(t *testing.T) {
 			return grpcserver.TaskSnapshot{}, nil
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/task-3", nil)
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -228,10 +262,12 @@ func TestCancelTaskTerminalConflict(t *testing.T) {
 			}, grpcserver.ErrTaskTerminal
 		},
 	}, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/task-5/cancel", nil)
 	rec := httptest.NewRecorder()
+	setMCPTokenHeader(req)
+
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusConflict {

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import ErrorBanner from '@/components/common/ErrorBanner.vue'
 import DashboardHeader from '@/components/dashboard/DashboardHeader.vue'
+import McpTokensPanel from '@/components/dashboard/McpTokensPanel.vue'
 import PaginationBar from '@/components/dashboard/PaginationBar.vue'
 import StatsGrid from '@/components/dashboard/StatsGrid.vue'
 import WorkersTable from '@/components/dashboard/WorkersTable.vue'
@@ -134,6 +135,13 @@ onBeforeUnmount(() => {
       :offline-workers="workersStore.offlineWorkers"
       :stale-workers="workersStore.staleWorkers"
       :stale-workers-label="workersStore.staleWorkersLabel"
+    />
+
+    <McpTokensPanel
+      :tokens="workersStore.mcpTokens"
+      :copying-token="workersStore.copyingMcpToken"
+      :copy-button-text="workersStore.mcpTokenCopyButtonText"
+      @copy-token="workersStore.copyMcpToken"
     />
 
     <section class="board-panel">

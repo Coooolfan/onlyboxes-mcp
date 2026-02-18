@@ -79,7 +79,7 @@ func TestResolveDashboardCredentials(t *testing.T) {
 func TestConsoleAuthLoginLogoutLifecycle(t *testing.T) {
 	handler := NewWorkerHandler(registry.NewStore(), 15*time.Second, nil, nil, "")
 	auth := newTestConsoleAuth(t)
-	router := NewRouter(handler, auth)
+	router := NewRouter(handler, auth, newTestMCPAuth())
 
 	failedReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/login", strings.NewReader(`{"username":"wrong","password":"wrong"}`))
 	failedReq.Header.Set("Content-Type", "application/json")
@@ -123,7 +123,7 @@ func TestConsoleAuthSessionExpires(t *testing.T) {
 	auth.nowFn = func() time.Time {
 		return now
 	}
-	router := NewRouter(handler, auth)
+	router := NewRouter(handler, auth, newTestMCPAuth())
 	sessionCookie := loginSessionCookie(t, router)
 
 	now = now.Add(dashboardSessionTTL + time.Second)

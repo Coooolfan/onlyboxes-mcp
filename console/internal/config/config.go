@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/onlyboxes/onlyboxes/console/internal/tokenlist"
 )
 
 const (
@@ -22,6 +24,7 @@ type Config struct {
 	HeartbeatIntervalSec int32
 	DashboardUsername    string
 	DashboardPassword    string
+	MCPAllowedTokens     []string
 }
 
 func Load() Config {
@@ -37,6 +40,7 @@ func Load() Config {
 		HeartbeatIntervalSec: int32(heartbeatIntervalSec),
 		DashboardUsername:    os.Getenv("CONSOLE_DASHBOARD_USERNAME"),
 		DashboardPassword:    os.Getenv("CONSOLE_DASHBOARD_PASSWORD"),
+		MCPAllowedTokens:     parseCommaSeparatedUniqueEnv("CONSOLE_MCP_ALLOWED_TOKENS"),
 	}
 }
 
@@ -58,4 +62,8 @@ func parsePositiveIntEnv(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return parsed
+}
+
+func parseCommaSeparatedUniqueEnv(key string) []string {
+	return tokenlist.ParseCommaSeparated(os.Getenv(key))
 }

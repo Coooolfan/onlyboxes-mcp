@@ -45,7 +45,7 @@ func TestRegisterAndListLifecycle(t *testing.T) {
 	defer grpcSrv.Stop()
 
 	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
 	dashboardClient := newAuthenticatedClient(t, httpSrv)
@@ -155,7 +155,7 @@ func TestEchoCommandLifecycle(t *testing.T) {
 	defer grpcSrv.Stop()
 
 	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
 
@@ -220,11 +220,7 @@ func TestEchoCommandLifecycle(t *testing.T) {
 		}
 	}()
 
-	res, err := http.Post(
-		httpSrv.URL+"/api/v1/commands/echo",
-		"application/json",
-		bytes.NewBufferString(`{"message":"hello echo"}`),
-	)
+	res, err := postJSONWithMCPToken(httpSrv.URL+"/api/v1/commands/echo", `{"message":"hello echo"}`)
 	if err != nil {
 		t.Fatalf("failed to call echo API: %v", err)
 	}
@@ -266,7 +262,7 @@ func TestTaskLifecycleSync(t *testing.T) {
 	defer grpcSrv.Stop()
 
 	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
 
@@ -330,10 +326,9 @@ func TestTaskLifecycleSync(t *testing.T) {
 		}
 	}()
 
-	res, err := http.Post(
+	res, err := postJSONWithMCPToken(
 		httpSrv.URL+"/api/v1/tasks",
-		"application/json",
-		bytes.NewBufferString(`{"capability":"echo","input":{"message":"hello task"},"mode":"sync","wait_ms":1000,"timeout_ms":5000}`),
+		`{"capability":"echo","input":{"message":"hello task"},"mode":"sync","wait_ms":1000,"timeout_ms":5000}`,
 	)
 	if err != nil {
 		t.Fatalf("failed to call task API: %v", err)
@@ -379,7 +374,7 @@ func TestMCPLifecycle(t *testing.T) {
 	defer grpcSrv.Stop()
 
 	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
 
@@ -496,9 +491,18 @@ func TestMCPLifecycle(t *testing.T) {
 		Name:    "mcp-integration-client",
 		Version: "v0.1.0",
 	}, nil)
+	_, err = mcpClient.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:             httpSrv.URL + "/mcp",
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected MCP connect without token to fail")
+	}
+
 	session, err := mcpClient.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint:             httpSrv.URL + "/mcp",
 		DisableStandaloneSSE: true,
+		HTTPClient:           newMCPTokenHTTPClient(testMCPToken),
 	}, nil)
 	if err != nil {
 		t.Fatalf("failed to connect MCP client: %v", err)
@@ -563,7 +567,7 @@ func TestTerminalLifecycle(t *testing.T) {
 	defer grpcSrv.Stop()
 
 	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
-	router := NewRouter(handler, newTestConsoleAuth(t))
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
 
@@ -855,10 +859,9 @@ func TestTerminalLifecycle(t *testing.T) {
 		}
 	}()
 
-	writeRes, err := http.Post(
+	writeRes, err := postJSONWithMCPToken(
 		httpSrv.URL+"/api/v1/commands/terminal",
-		"application/json",
-		bytes.NewBufferString(`{"command":"write"}`),
+		`{"command":"write"}`,
 	)
 	if err != nil {
 		t.Fatalf("failed to call terminal write API: %v", err)
@@ -876,11 +879,7 @@ func TestTerminalLifecycle(t *testing.T) {
 	}
 
 	readReqBody := `{"command":"read","session_id":"` + writePayload.SessionID + `"}`
-	readRes, err := http.Post(
-		httpSrv.URL+"/api/v1/commands/terminal",
-		"application/json",
-		bytes.NewBufferString(readReqBody),
-	)
+	readRes, err := postJSONWithMCPToken(httpSrv.URL+"/api/v1/commands/terminal", readReqBody)
 	if err != nil {
 		t.Fatalf("failed to call terminal read API: %v", err)
 	}
@@ -903,6 +902,7 @@ func TestTerminalLifecycle(t *testing.T) {
 	session, err := mcpClient.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint:             httpSrv.URL + "/mcp",
 		DisableStandaloneSSE: true,
+		HTTPClient:           newMCPTokenHTTPClient(testMCPToken),
 	}, nil)
 	if err != nil {
 		t.Fatalf("failed to connect MCP client: %v", err)
@@ -1078,6 +1078,45 @@ func toInt(t *testing.T, value any) int {
 		t.Fatalf("expected numeric value, got %#v", value)
 		return 0
 	}
+}
+
+type mcpTokenTransport struct {
+	base  http.RoundTripper
+	token string
+}
+
+func (t *mcpTokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+
+	cloned := req.Clone(req.Context())
+	cloned.Header = req.Header.Clone()
+	if strings.TrimSpace(t.token) != "" {
+		cloned.Header.Set(mcpTokenHeader, strings.TrimSpace(t.token))
+	}
+	return base.RoundTrip(cloned)
+}
+
+func newMCPTokenHTTPClient(token string) *http.Client {
+	return &http.Client{
+		Transport: &mcpTokenTransport{
+			base:  http.DefaultTransport,
+			token: token,
+		},
+	}
+}
+
+func postJSONWithMCPToken(url string, body string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBufferString(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set(mcpTokenHeader, testMCPToken)
+	return http.DefaultClient.Do(req)
 }
 
 func requestList(t *testing.T, client *http.Client, url string) listWorkersResponse {

@@ -14,6 +14,7 @@ CONSOLE_REPLAY_WINDOW_SEC=60 \
 CONSOLE_HEARTBEAT_INTERVAL_SEC=5 \
 CONSOLE_DASHBOARD_USERNAME=admin \
 CONSOLE_DASHBOARD_PASSWORD=change-me \
+CONSOLE_MCP_ALLOWED_TOKENS=token-a,token-b \
 go run ./cmd/console
 ```
 
@@ -23,6 +24,9 @@ go run ./cmd/console
 - 若 `CONSOLE_DASHBOARD_USERNAME` / `CONSOLE_DASHBOARD_PASSWORD` 有设置，则直接使用设置值。
 - 若任一未设置，仅缺失项会随机生成。
 
+`CONSOLE_MCP_ALLOWED_TOKENS` 用于配置 MCP 白名单 token（逗号分隔，自动 trim、去空、去重）。  
+若该环境变量未设置或解析后为空，`/mcp` 会全部返回 `401`。
+
 2. 登录控制台（保存 Cookie）：
 
 ```bash
@@ -31,7 +35,13 @@ curl -c /tmp/onlyboxes-console.cookie -X POST "http://127.0.0.1:8089/api/v1/cons
   -d '{"username":"<dashboard_username>","password":"<dashboard_password>"}'
 ```
 
-3. 新增 worker 并获取启动命令（接口需登录）：
+3. 查看当前 MCP 白名单 token（接口需登录）：
+
+```bash
+curl -b /tmp/onlyboxes-console.cookie "http://127.0.0.1:8089/api/v1/console/mcp/tokens"
+```
+
+4. 新增 worker 并获取启动命令（接口需登录）：
 
 ```bash
 curl -b /tmp/onlyboxes-console.cookie -X POST "http://127.0.0.1:8089/api/v1/workers"
@@ -46,36 +56,37 @@ curl -b /tmp/onlyboxes-console.cookie -X POST "http://127.0.0.1:8089/api/v1/work
 }
 ```
 
-4. 启动 `worker-docker`（终端 2，使用上一步返回的 `command`）：
+5. 启动 `worker-docker`（终端 2，使用上一步返回的 `command`）：
 
 ```bash
 cd /Users/yang/Documents/code/onlyboxes/worker/worker-docker
 <command_from_create_worker_api>
 ```
 
-5. 查看已注册 worker（仪表盘接口需登录）：
+6. 查看已注册 worker（仪表盘接口需登录）：
 
 ```bash
 curl -b /tmp/onlyboxes-console.cookie "http://127.0.0.1:8089/api/v1/workers?page=1&page_size=20&status=all"
 ```
 
-6. 一键复制场景对应的接口：按 worker 获取启动命令（接口需登录，响应仅返回命令文本）：
+7. 一键复制场景对应的接口：按 worker 获取启动命令（接口需登录，响应仅返回命令文本）：
 
 ```bash
 curl -b /tmp/onlyboxes-console.cookie "http://127.0.0.1:8089/api/v1/workers/<worker_id>/startup-command"
 ```
 
-7. 删除 worker（接口需登录，若 worker 在线将被立即断开）：
+8. 删除 worker（接口需登录，若 worker 在线将被立即断开）：
 
 ```bash
 curl -b /tmp/onlyboxes-console.cookie -X DELETE "http://127.0.0.1:8089/api/v1/workers/<worker_id>"
 ```
 
-8. 调用 echo 命令链路（阻塞等待 worker 返回，执行类接口无需登录）：
+9. 调用 echo 命令链路（阻塞等待 worker 返回，执行类接口需携带 MCP token）：
 
 ```bash
 curl -X POST "http://127.0.0.1:8089/api/v1/commands/echo" \
   -H "Content-Type: application/json" \
+  -H "X-Onlyboxes-MCP-Token: <mcp_token>" \
   -d '{"message":"hello onlyboxes","timeout_ms":5000}'
 ```
 
@@ -87,18 +98,29 @@ curl -X POST "http://127.0.0.1:8089/api/v1/commands/echo" \
 }
 ```
 
-9. 提交通用任务（`mode=auto`，先等 `wait_ms`，未完成则返回 `202`）：
+10. 提交通用任务（`mode=auto`，先等 `wait_ms`，未完成则返回 `202`）：
 
 ```bash
 curl -X POST "http://127.0.0.1:8089/api/v1/tasks" \
   -H "Content-Type: application/json" \
+  -H "X-Onlyboxes-MCP-Token: <mcp_token>" \
   -d '{"capability":"echo","input":{"message":"hello task"},"mode":"auto","wait_ms":1500,"timeout_ms":60000}'
 ```
 
-10. 查询任务状态：
+11. 查询任务状态：
 
 ```bash
-curl "http://127.0.0.1:8089/api/v1/tasks/<task_id>"
+curl -H "X-Onlyboxes-MCP-Token: <mcp_token>" "http://127.0.0.1:8089/api/v1/tasks/<task_id>"
+```
+
+12. 调用 MCP 接口（必须带白名单 token）：
+
+```bash
+curl -X POST "http://127.0.0.1:8089/mcp" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "X-Onlyboxes-MCP-Token: <mcp_token>" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
 ## 前端开发（Vite 反向代理）

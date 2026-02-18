@@ -8,14 +8,18 @@ The console service hosts:
   - `POST /api/v1/workers` for creating a provisioned worker (`worker_id` + `worker_secret`) and returning its startup command.
   - `DELETE /api/v1/workers/:node_id` for deleting a provisioned worker and revoking its credential (online worker is disconnected immediately).
   - `GET /api/v1/workers/:node_id/startup-command` for on-demand copy of a worker startup command (includes `WORKER_ID` + `WORKER_SECRET` in command text only).
-- command APIs (execution, no authentication required):
+- command APIs (execution, token whitelist required):
   - `POST /api/v1/commands/echo` for blocking echo command execution.
   - `POST /api/v1/commands/terminal` for blocking terminal command execution over `terminalExec` capability.
   - `POST /api/v1/tasks` for sync/async/auto task submission.
   - `GET /api/v1/tasks/:task_id` for task status and result lookup.
   - `POST /api/v1/tasks/:task_id/cancel` for best-effort task cancellation.
-- MCP Streamable HTTP API (no authentication required):
+  - request header: `X-Onlyboxes-MCP-Token: <token>` (must be in whitelist).
+- MCP Streamable HTTP API (token whitelist required):
   - `POST /mcp` for JSON-RPC requests over Streamable HTTP transport.
+  - request header: `X-Onlyboxes-MCP-Token: <token>` (must be in whitelist).
+  - whitelist env: `CONSOLE_MCP_ALLOWED_TOKENS` (comma-separated tokens).
+  - if whitelist is empty (unset/blank/parsed-empty), all `/mcp` requests are rejected with `401`.
   - `GET /mcp` is intentionally unsupported and returns `405` with `Allow: POST`.
   - stream behavior is JSON response only (`application/json`), no SSE streaming channel.
   - tool argument validation is strict (`additionalProperties=false`): unknown input fields are rejected with JSON-RPC `invalid params (-32602)`.
@@ -51,6 +55,7 @@ The console service hosts:
 - dashboard authentication APIs:
   - `POST /api/v1/console/login` with `{"username":"...","password":"..."}`.
   - `POST /api/v1/console/logout`.
+  - `GET /api/v1/console/mcp/tokens` for listing MCP whitelist tokens (requires dashboard auth).
 
 Credential behavior:
 - `console` starts with `0` workers.
@@ -70,21 +75,29 @@ Dashboard credential behavior:
 - password env: `CONSOLE_DASHBOARD_PASSWORD`
 - if either env var is missing, only the missing value is randomly generated.
 
+MCP token whitelist behavior:
+- token env: `CONSOLE_MCP_ALLOWED_TOKENS` (comma-separated, trims whitespace, removes empty items, de-duplicates while preserving order).
+- startup logs whitelist token count only (never logs token plaintext).
+- if resolved token list is empty, MCP is effectively disabled (`/mcp` always returns `401`).
+
 MCP minimal call sequence (initialize + tools/list + tools/call):
 
 ```bash
 curl -X POST "http://127.0.0.1:8089/mcp" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
+  -H "X-Onlyboxes-MCP-Token: <mcp_token>" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"manual-client","version":"0.1.0"}}}'
 
 curl -X POST "http://127.0.0.1:8089/mcp" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
+  -H "X-Onlyboxes-MCP-Token: <mcp_token>" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 
 curl -X POST "http://127.0.0.1:8089/mcp" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
+  -H "X-Onlyboxes-MCP-Token: <mcp_token>" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"pythonExec","arguments":{"code":"print(1)"}}}'
 ```

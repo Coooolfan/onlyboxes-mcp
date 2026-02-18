@@ -5,6 +5,7 @@ import router from '@/router'
 import {
   createWorkerAPI,
   deleteWorkerAPI,
+  fetchMcpTokensAPI,
   fetchWorkerStartupCommandAPI,
   fetchWorkersAPI,
   fetchWorkerStatsAPI,
@@ -90,14 +91,18 @@ export const useWorkersStore = defineStore('workers', () => {
   const copyingNodeID = ref('')
   const copiedNodeID = ref('')
   const copyFailedNodeID = ref('')
+  const copyingMcpToken = ref('')
+  const copiedMcpToken = ref('')
 
   const dashboardStats = ref<WorkerStatsResponse>(emptyStats())
   const currentList = ref<WorkerListResponse | null>(null)
+  const mcpTokens = ref<string[]>([])
 
   let timer: ReturnType<typeof setInterval> | null = null
   let loadRequestSerial = 0
   let activeController: AbortController | null = null
   let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null
+  let mcpTokenCopyFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 
   const totalWorkers = computed(() => dashboardStats.value.total)
   const onlineWorkers = computed(() => dashboardStats.value.online)
@@ -142,9 +147,29 @@ export const useWorkersStore = defineStore('workers', () => {
     copyFailedNodeID.value = ''
   }
 
+  function scheduleMcpTokenCopyFeedbackReset(): void {
+    if (mcpTokenCopyFeedbackTimer) {
+      clearTimeout(mcpTokenCopyFeedbackTimer)
+    }
+    mcpTokenCopyFeedbackTimer = setTimeout(() => {
+      copiedMcpToken.value = ''
+      mcpTokenCopyFeedbackTimer = null
+    }, 1500)
+  }
+
+  function resetMcpTokenCopyFeedback(): void {
+    if (mcpTokenCopyFeedbackTimer) {
+      clearTimeout(mcpTokenCopyFeedbackTimer)
+      mcpTokenCopyFeedbackTimer = null
+    }
+    copyingMcpToken.value = ''
+    copiedMcpToken.value = ''
+  }
+
   function resetDashboard(): void {
     currentList.value = null
     dashboardStats.value = emptyStats()
+    mcpTokens.value = []
     refreshedAt.value = null
     page.value = 1
   }
@@ -153,6 +178,7 @@ export const useWorkersStore = defineStore('workers', () => {
     const authStore = useAuthStore()
     authStore.logoutLocal()
     resetCopyFeedback()
+    resetMcpTokenCopyFeedback()
     resetDashboard()
     errorMessage.value = ''
 
@@ -174,9 +200,10 @@ export const useWorkersStore = defineStore('workers', () => {
     errorMessage.value = ''
 
     try {
-      const [statsRes, listRes] = await Promise.all([
+      const [statsRes, listRes, mcpTokensRes] = await Promise.all([
         fetchWorkerStatsAPI(staleAfterDefaultSec, controller.signal),
         fetchWorkersAPI(statusFilter.value, page.value, pageSize, controller.signal),
+        fetchMcpTokensAPI(controller.signal),
       ])
 
       if (requestSerial !== loadRequestSerial || controller.signal.aborted) {
@@ -185,6 +212,7 @@ export const useWorkersStore = defineStore('workers', () => {
 
       dashboardStats.value = statsRes
       currentList.value = listRes
+      mcpTokens.value = mcpTokensRes.tokens ?? []
       refreshedAt.value = parseTimestamp(statsRes.generated_at) ?? new Date()
 
       if (page.value > totalPages.value) {
@@ -267,6 +295,16 @@ export const useWorkersStore = defineStore('workers', () => {
       return 'Deleting...'
     }
     return 'Delete'
+  }
+
+  function mcpTokenCopyButtonText(token: string): string {
+    if (copyingMcpToken.value === token) {
+      return 'Copying...'
+    }
+    if (copiedMcpToken.value === token) {
+      return 'Copied'
+    }
+    return 'Copy Token'
   }
 
   function formatDateTime(value: string): string {
@@ -428,6 +466,33 @@ export const useWorkersStore = defineStore('workers', () => {
     }
   }
 
+  async function copyMcpToken(token: string): Promise<void> {
+    const target = token.trim()
+    if (!target || copyingMcpToken.value === target) {
+      return
+    }
+
+    if (mcpTokenCopyFeedbackTimer) {
+      clearTimeout(mcpTokenCopyFeedbackTimer)
+      mcpTokenCopyFeedbackTimer = null
+    }
+    copiedMcpToken.value = ''
+    errorMessage.value = ''
+    copyingMcpToken.value = target
+
+    try {
+      await writeTextToClipboard(target)
+      copiedMcpToken.value = target
+      scheduleMcpTokenCopyFeedbackReset()
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : 'Failed to copy MCP token.'
+    } finally {
+      if (copyingMcpToken.value === target) {
+        copyingMcpToken.value = ''
+      }
+    }
+  }
+
   function toggleAutoRefresh(): void {
     autoRefreshEnabled.value = !autoRefreshEnabled.value
   }
@@ -472,6 +537,7 @@ export const useWorkersStore = defineStore('workers', () => {
     activeController?.abort()
     stopAutoRefresh()
     resetCopyFeedback()
+    resetMcpTokenCopyFeedback()
   }
 
   return {
@@ -487,8 +553,11 @@ export const useWorkersStore = defineStore('workers', () => {
     copyingNodeID,
     copiedNodeID,
     copyFailedNodeID,
+    copyingMcpToken,
+    copiedMcpToken,
     dashboardStats,
     currentList,
+    mcpTokens,
     totalWorkers,
     onlineWorkers,
     offlineWorkers,
@@ -506,6 +575,7 @@ export const useWorkersStore = defineStore('workers', () => {
     nextPage,
     startupCopyButtonText,
     deleteWorkerButtonText,
+    mcpTokenCopyButtonText,
     formatDateTime,
     formatAge,
     formatCapabilities,
@@ -513,6 +583,7 @@ export const useWorkersStore = defineStore('workers', () => {
     copyWorkerStartupCommand,
     createWorker,
     deleteWorker,
+    copyMcpToken,
     toggleAutoRefresh,
     startAutoRefresh,
     stopAutoRefresh,
