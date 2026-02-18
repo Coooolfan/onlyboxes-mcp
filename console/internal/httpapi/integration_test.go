@@ -587,6 +587,7 @@ func TestTerminalLifecycle(t *testing.T) {
 		ExecutorKind: "docker",
 		Capabilities: []*registryv1.CapabilityDeclaration{
 			{Name: terminalExecCapabilityName, MaxInflight: 4},
+			{Name: terminalResourceCapabilityName, MaxInflight: 4},
 		},
 		Version:         "v0.1.0",
 		TimestampUnixMs: time.Now().UnixMilli(),
@@ -609,6 +610,8 @@ func TestTerminalLifecycle(t *testing.T) {
 
 	go func() {
 		sessionContent := map[string]string{}
+		sessionFiles := map[string]map[string][]byte{}
+		sessionFileMIME := map[string]map[string]string{}
 		for {
 			resp, recvErr := stream.Recv()
 			if recvErr != nil {
@@ -620,51 +623,131 @@ func TestTerminalLifecycle(t *testing.T) {
 			}
 
 			capability := strings.TrimSpace(strings.ToLower(dispatch.GetCapability()))
-			if capability != "terminalexec" {
-				_ = stream.Send(&registryv1.ConnectRequest{
-					Payload: &registryv1.ConnectRequest_CommandResult{
-						CommandResult: &registryv1.CommandResult{
-							CommandId: dispatch.GetCommandId(),
-							Error: &registryv1.CommandError{
-								Code:    "unsupported_capability",
-								Message: "unsupported capability",
+			switch capability {
+			case "terminalexec":
+				payload := terminalExecPayload{}
+				if err := json.Unmarshal(dispatch.GetPayloadJson(), &payload); err != nil {
+					_ = stream.Send(&registryv1.ConnectRequest{
+						Payload: &registryv1.ConnectRequest_CommandResult{
+							CommandResult: &registryv1.CommandResult{
+								CommandId: dispatch.GetCommandId(),
+								Error: &registryv1.CommandError{
+									Code:    terminalExecInvalidPayloadCode,
+									Message: "invalid payload",
+								},
+								CompletedUnixMs: time.Now().UnixMilli(),
 							},
-							CompletedUnixMs: time.Now().UnixMilli(),
 						},
-					},
-				})
-				continue
-			}
+					})
+					continue
+				}
 
-			payload := terminalExecPayload{}
-			if err := json.Unmarshal(dispatch.GetPayloadJson(), &payload); err != nil {
-				_ = stream.Send(&registryv1.ConnectRequest{
-					Payload: &registryv1.ConnectRequest_CommandResult{
-						CommandResult: &registryv1.CommandResult{
-							CommandId: dispatch.GetCommandId(),
-							Error: &registryv1.CommandError{
-								Code:    terminalExecInvalidPayloadCode,
-								Message: "invalid payload",
-							},
-							CompletedUnixMs: time.Now().UnixMilli(),
-						},
-					},
-				})
-				continue
-			}
+				sessionID := strings.TrimSpace(payload.SessionID)
+				created := false
+				if sessionID == "" {
+					sessionID = "session-1"
+					if _, ok := sessionContent[sessionID]; !ok {
+						sessionContent[sessionID] = ""
+						sessionFiles[sessionID] = map[string][]byte{}
+						sessionFileMIME[sessionID] = map[string]string{}
+						created = true
+					}
+				}
 
-			sessionID := strings.TrimSpace(payload.SessionID)
-			created := false
-			if sessionID == "" {
-				sessionID = "session-1"
 				if _, ok := sessionContent[sessionID]; !ok {
+					if !payload.CreateIfMissing {
+						_ = stream.Send(&registryv1.ConnectRequest{
+							Payload: &registryv1.ConnectRequest_CommandResult{
+								CommandResult: &registryv1.CommandResult{
+									CommandId: dispatch.GetCommandId(),
+									Error: &registryv1.CommandError{
+										Code:    terminalExecSessionNotFoundCode,
+										Message: "session not found",
+									},
+									CompletedUnixMs: time.Now().UnixMilli(),
+								},
+							},
+						})
+						continue
+					}
 					sessionContent[sessionID] = ""
+					sessionFiles[sessionID] = map[string][]byte{}
+					sessionFileMIME[sessionID] = map[string]string{}
 					created = true
 				}
-			}
 
-			if _, ok := sessionContent[sessionID]; !ok {
-				if !payload.CreateIfMissing {
+				stdout := ""
+				switch strings.TrimSpace(payload.Command) {
+				case "write":
+					sessionContent[sessionID] = "persisted"
+					sessionFiles[sessionID]["/workspace/state.txt"] = []byte("persisted")
+					sessionFileMIME[sessionID]["/workspace/state.txt"] = "text/plain"
+					sessionFiles[sessionID]["/workspace/image.png"] = []byte{0x89, 0x50, 0x4e, 0x47}
+					sessionFileMIME[sessionID]["/workspace/image.png"] = "image/png"
+					sessionFiles[sessionID]["/workspace/fail-image.png"] = []byte{0x89, 0x50, 0x4e, 0x47}
+					sessionFileMIME[sessionID]["/workspace/fail-image.png"] = "image/png"
+					sessionFiles[sessionID]["/workspace/sound.wav"] = []byte{0x52, 0x49, 0x46, 0x46}
+					sessionFileMIME[sessionID]["/workspace/sound.wav"] = "audio/wav"
+				case "read":
+					stdout = sessionContent[sessionID]
+				}
+
+				resultJSON, _ := json.Marshal(terminalCommandResponse{
+					SessionID:          sessionID,
+					Created:            created,
+					Stdout:             stdout,
+					Stderr:             "",
+					ExitCode:           0,
+					StdoutTruncated:    false,
+					StderrTruncated:    false,
+					LeaseExpiresUnixMS: time.Now().Add(60 * time.Second).UnixMilli(),
+				})
+				_ = stream.Send(&registryv1.ConnectRequest{
+					Payload: &registryv1.ConnectRequest_CommandResult{
+						CommandResult: &registryv1.CommandResult{
+							CommandId:       dispatch.GetCommandId(),
+							PayloadJson:     resultJSON,
+							CompletedUnixMs: time.Now().UnixMilli(),
+						},
+					},
+				})
+			case "terminalresource":
+				payload := mcpTerminalResourcePayload{}
+				if err := json.Unmarshal(dispatch.GetPayloadJson(), &payload); err != nil {
+					_ = stream.Send(&registryv1.ConnectRequest{
+						Payload: &registryv1.ConnectRequest_CommandResult{
+							CommandResult: &registryv1.CommandResult{
+								CommandId: dispatch.GetCommandId(),
+								Error: &registryv1.CommandError{
+									Code:    terminalExecInvalidPayloadCode,
+									Message: "invalid payload",
+								},
+								CompletedUnixMs: time.Now().UnixMilli(),
+							},
+						},
+					})
+					continue
+				}
+
+				sessionID := strings.TrimSpace(payload.SessionID)
+				filePath := strings.TrimSpace(payload.FilePath)
+				if sessionID == "" || filePath == "" {
+					_ = stream.Send(&registryv1.ConnectRequest{
+						Payload: &registryv1.ConnectRequest_CommandResult{
+							CommandResult: &registryv1.CommandResult{
+								CommandId: dispatch.GetCommandId(),
+								Error: &registryv1.CommandError{
+									Code:    terminalExecInvalidPayloadCode,
+									Message: "session_id and file_path are required",
+								},
+								CompletedUnixMs: time.Now().UnixMilli(),
+							},
+						},
+					})
+					continue
+				}
+				files, ok := sessionFiles[sessionID]
+				if !ok {
 					_ = stream.Send(&registryv1.ConnectRequest{
 						Payload: &registryv1.ConnectRequest_CommandResult{
 							CommandResult: &registryv1.CommandResult{
@@ -679,37 +762,96 @@ func TestTerminalLifecycle(t *testing.T) {
 					})
 					continue
 				}
-				sessionContent[sessionID] = ""
-				created = true
-			}
+				if filePath == "/workspace/dir" {
+					_ = stream.Send(&registryv1.ConnectRequest{
+						Payload: &registryv1.ConnectRequest_CommandResult{
+							CommandResult: &registryv1.CommandResult{
+								CommandId: dispatch.GetCommandId(),
+								Error: &registryv1.CommandError{
+									Code:    "path_is_directory",
+									Message: "path is directory",
+								},
+								CompletedUnixMs: time.Now().UnixMilli(),
+							},
+						},
+					})
+					continue
+				}
+				content, exists := files[filePath]
+				if !exists {
+					_ = stream.Send(&registryv1.ConnectRequest{
+						Payload: &registryv1.ConnectRequest_CommandResult{
+							CommandResult: &registryv1.CommandResult{
+								CommandId: dispatch.GetCommandId(),
+								Error: &registryv1.CommandError{
+									Code:    "file_not_found",
+									Message: "file not found",
+								},
+								CompletedUnixMs: time.Now().UnixMilli(),
+							},
+						},
+					})
+					continue
+				}
 
-			stdout := ""
-			switch strings.TrimSpace(payload.Command) {
-			case "write":
-				sessionContent[sessionID] = "persisted"
-			case "read":
-				stdout = sessionContent[sessionID]
-			}
+				action := strings.TrimSpace(strings.ToLower(payload.Action))
+				if action == "" {
+					action = "validate"
+				}
+				if action == "read" && filePath == "/workspace/fail-image.png" {
+					_ = stream.Send(&registryv1.ConnectRequest{
+						Payload: &registryv1.ConnectRequest_CommandResult{
+							CommandResult: &registryv1.CommandResult{
+								CommandId: dispatch.GetCommandId(),
+								Error: &registryv1.CommandError{
+									Code:    "file_too_large",
+									Message: "file too large",
+								},
+								CompletedUnixMs: time.Now().UnixMilli(),
+							},
+						},
+					})
+					continue
+				}
 
-			resultJSON, _ := json.Marshal(terminalCommandResponse{
-				SessionID:          sessionID,
-				Created:            created,
-				Stdout:             stdout,
-				Stderr:             "",
-				ExitCode:           0,
-				StdoutTruncated:    false,
-				StderrTruncated:    false,
-				LeaseExpiresUnixMS: time.Now().Add(60 * time.Second).UnixMilli(),
-			})
-			_ = stream.Send(&registryv1.ConnectRequest{
-				Payload: &registryv1.ConnectRequest_CommandResult{
-					CommandResult: &registryv1.CommandResult{
-						CommandId:       dispatch.GetCommandId(),
-						PayloadJson:     resultJSON,
-						CompletedUnixMs: time.Now().UnixMilli(),
+				result := mcpTerminalResourceResult{
+					SessionID: sessionID,
+					FilePath:  filePath,
+					MIMEType:  "application/octet-stream",
+					SizeBytes: int64(len(content)),
+				}
+				if mimes, ok := sessionFileMIME[sessionID]; ok {
+					if mimeType := strings.TrimSpace(mimes[filePath]); mimeType != "" {
+						result.MIMEType = mimeType
+					}
+				}
+				if action == "read" {
+					result.Blob = append([]byte(nil), content...)
+				}
+				resultJSON, _ := json.Marshal(result)
+				_ = stream.Send(&registryv1.ConnectRequest{
+					Payload: &registryv1.ConnectRequest_CommandResult{
+						CommandResult: &registryv1.CommandResult{
+							CommandId:       dispatch.GetCommandId(),
+							PayloadJson:     resultJSON,
+							CompletedUnixMs: time.Now().UnixMilli(),
+						},
 					},
-				},
-			})
+				})
+			default:
+				_ = stream.Send(&registryv1.ConnectRequest{
+					Payload: &registryv1.ConnectRequest_CommandResult{
+						CommandResult: &registryv1.CommandResult{
+							CommandId: dispatch.GetCommandId(),
+							Error: &registryv1.CommandError{
+								Code:    "unsupported_capability",
+								Message: "unsupported capability",
+							},
+							CompletedUnixMs: time.Now().UnixMilli(),
+						},
+					},
+				})
+			}
 		}
 	}()
 
@@ -783,6 +925,108 @@ func TestTerminalLifecycle(t *testing.T) {
 	terminalStructured := structuredContentMap(t, toolResult.StructuredContent)
 	if got := toString(t, terminalStructured["stdout"]); got != "persisted" {
 		t.Fatalf("unexpected terminalExec output: %q", got)
+	}
+
+	textResult, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "readImage",
+		Arguments: map[string]any{
+			"session_id": writePayload.SessionID,
+			"file_path":  "/workspace/state.txt",
+		},
+	})
+	if err != nil {
+		t.Fatalf("mcp readImage tools/call failed: %v", err)
+	}
+	if textResult.IsError {
+		t.Fatalf("expected readImage success, got error=%q", firstTextContent(textResult))
+	}
+	if textResult.StructuredContent != nil {
+		t.Fatalf("expected no structured content for readImage")
+	}
+	if len(textResult.Content) != 1 {
+		t.Fatalf("expected one text content for text mime, got %d", len(textResult.Content))
+	}
+	textContent, ok := textResult.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected text content for non-image mime, got %T", textResult.Content[0])
+	}
+	if !strings.Contains(textContent.Text, "unsupported mime type: text/plain; expected image/*") {
+		t.Fatalf("unexpected text mime fallback message: %q", textContent.Text)
+	}
+
+	imageResult, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "readImage",
+		Arguments: map[string]any{
+			"session_id": writePayload.SessionID,
+			"file_path":  "/workspace/image.png",
+		},
+	})
+	if err != nil {
+		t.Fatalf("mcp readImage(image) tools/call failed: %v", err)
+	}
+	if imageResult.IsError {
+		t.Fatalf("expected image read success, got error=%q", firstTextContent(imageResult))
+	}
+	if imageResult.StructuredContent != nil {
+		t.Fatalf("expected no structured content for readImage")
+	}
+	if len(imageResult.Content) != 1 {
+		t.Fatalf("expected [image] content, got %d", len(imageResult.Content))
+	}
+	imageContent, ok := imageResult.Content[0].(*mcp.ImageContent)
+	if !ok {
+		t.Fatalf("expected image content, got %T", imageResult.Content[0])
+	}
+	if imageContent.MIMEType != "image/png" {
+		t.Fatalf("expected image MIME image/png, got %q", imageContent.MIMEType)
+	}
+	if len(imageContent.Data) == 0 {
+		t.Fatalf("expected non-empty image bytes")
+	}
+
+	audioResult, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "readImage",
+		Arguments: map[string]any{
+			"session_id": writePayload.SessionID,
+			"file_path":  "/workspace/sound.wav",
+		},
+	})
+	if err != nil {
+		t.Fatalf("mcp readImage(audio) tools/call failed: %v", err)
+	}
+	if audioResult.IsError {
+		t.Fatalf("expected audio fallback success, got error=%q", firstTextContent(audioResult))
+	}
+	if audioResult.StructuredContent != nil {
+		t.Fatalf("expected no structured content for readImage")
+	}
+	if len(audioResult.Content) != 1 {
+		t.Fatalf("expected one text content for audio mime, got %d", len(audioResult.Content))
+	}
+	audioTextContent, ok := audioResult.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected text content for audio fallback, got %T", audioResult.Content[0])
+	}
+	if !strings.Contains(audioTextContent.Text, "unsupported mime type: audio/wav; expected image/*") {
+		t.Fatalf("unexpected audio mime fallback message: %q", audioTextContent.Text)
+	}
+
+	failImagePath := "/workspace/fail-image.png"
+	failImageResult, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "readImage",
+		Arguments: map[string]any{
+			"session_id": writePayload.SessionID,
+			"file_path":  failImagePath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("mcp readImage(fail-image) tools/call failed: %v", err)
+	}
+	if !failImageResult.IsError {
+		t.Fatalf("expected fail-image read to be tool error")
+	}
+	if got := firstTextContent(failImageResult); !strings.Contains(got, "file_too_large") {
+		t.Fatalf("expected file_too_large error text, got %q", got)
 	}
 }
 

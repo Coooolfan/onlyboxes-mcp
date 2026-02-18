@@ -17,19 +17,21 @@ import (
 )
 
 const (
-	mcpServerName              = "onlyboxes-console"
-	mcpServerVersion           = "v0.1.0"
-	pythonExecCapabilityName   = "pythonExec"
-	terminalExecCapabilityName = "terminalExec"
-	defaultMCPEchoTimeoutMS    = defaultEchoTimeoutMS
-	minMCPTaskTimeoutMS        = 1
-	defaultMCPTaskTimeoutMS    = defaultTaskTimeoutMS
-	maxMCPPythonExecTimeoutMS  = maxTaskTimeoutMS
-	minMCPTerminalLeaseSec     = 1
-	maxMCPTerminalLeaseSec     = 86400
-	mcpEchoToolTitle           = "Echo Message"
-	mcpPythonExecToolTitle     = "Python Execute"
-	mcpTerminalExecToolTitle   = "Terminal Execute"
+	mcpServerName                  = "onlyboxes-console"
+	mcpServerVersion               = "v0.1.0"
+	pythonExecCapabilityName       = "pythonExec"
+	terminalExecCapabilityName     = "terminalExec"
+	terminalResourceCapabilityName = "terminalResource"
+	defaultMCPEchoTimeoutMS        = defaultEchoTimeoutMS
+	minMCPTaskTimeoutMS            = 1
+	defaultMCPTaskTimeoutMS        = defaultTaskTimeoutMS
+	maxMCPPythonExecTimeoutMS      = maxTaskTimeoutMS
+	minMCPTerminalLeaseSec         = 1
+	maxMCPTerminalLeaseSec         = 86400
+	mcpEchoToolTitle               = "Echo Message"
+	mcpPythonExecToolTitle         = "Python Execute"
+	mcpTerminalExecToolTitle       = "Terminal Execute"
+	mcpReadImageToolTitle          = "Read Image"
 )
 
 type mcpEchoToolInput struct {
@@ -71,6 +73,12 @@ type mcpTerminalExecToolOutput struct {
 	LeaseExpiresUnixMS int64  `json:"lease_expires_unix_ms"`
 }
 
+type mcpReadImageToolInput struct {
+	SessionID string `json:"session_id"`
+	FilePath  string `json:"file_path"`
+	TimeoutMS *int   `json:"timeout_ms,omitempty"`
+}
+
 type pythonExecPayload struct {
 	Code string `json:"code"`
 }
@@ -80,6 +88,8 @@ var mcpEchoToolDescription = "Echoes the input message exactly as returned by an
 var mcpPythonExecToolDescription = "Executes Python code in the worker sandbox via the pythonExec capability and returns stdout, stderr, and exit_code. Use this for short, self-contained snippets. Do not use it for long-running jobs or persistent state. timeout_ms is a synchronous execution timeout in milliseconds (1-600000, default 60000). A non-zero exit_code is returned as normal tool output, not as a protocol error."
 
 var mcpTerminalExecToolDescription = "Executes shell commands in a persistent Docker-backed terminal session via the terminalExec capability. Reuse session_id to preserve filesystem state across calls. create_if_missing controls missing-session behavior. lease_ttl_sec extends session lease within worker-configured bounds. timeout_ms is a synchronous execution timeout in milliseconds (1-600000, default 60000)."
+
+var mcpReadImageToolDescription = "Reads a file from an existing terminal session and returns it as inline image content when mime type is image/*. For unsupported mime types, returns a text explanation."
 
 var mcpEchoInputSchema = map[string]any{
 	"type":                 "object",
@@ -216,11 +226,38 @@ var mcpTerminalExecOutputSchema = map[string]any{
 	},
 }
 
+var mcpReadImageInputSchema = map[string]any{
+	"type":                 "object",
+	"additionalProperties": false,
+	"required":             []string{"session_id", "file_path"},
+	"properties": map[string]any{
+		"session_id": map[string]any{
+			"type":        "string",
+			"description": "Terminal session identifier returned by terminalExec.",
+		},
+		"file_path": map[string]any{
+			"type":        "string",
+			"description": "Path to the file in the terminal session filesystem.",
+		},
+		"timeout_ms": map[string]any{
+			"type":        "integer",
+			"description": "Optional synchronous execution timeout in milliseconds for this tool call.",
+			"minimum":     minMCPTaskTimeoutMS,
+			"maximum":     maxMCPPythonExecTimeoutMS,
+			"default":     defaultMCPTaskTimeoutMS,
+		},
+	},
+}
+
 func NewMCPHandler(dispatcher CommandDispatcher) http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    mcpServerName,
 		Version: mcpServerVersion,
-	}, nil)
+	}, &mcp.ServerOptions{
+		Capabilities: &mcp.ServerCapabilities{
+			Logging: &mcp.LoggingCapabilities{},
+		},
+	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Title:       mcpEchoToolTitle,
@@ -392,6 +429,92 @@ func NewMCPHandler(dispatcher CommandDispatcher) http.Handler {
 		default:
 			return nil, mcpTerminalExecToolOutput{}, fmt.Errorf("unexpected task status: %s", task.Status)
 		}
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Title:       mcpReadImageToolTitle,
+		Name:        "readImage",
+		Description: mcpReadImageToolDescription,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           mcpReadImageToolTitle,
+			DestructiveHint: boolPtr(false),
+			OpenWorldHint:   boolPtr(true),
+		},
+		InputSchema: mcpReadImageInputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input mcpReadImageToolInput) (*mcp.CallToolResult, any, error) {
+		sessionID := strings.TrimSpace(input.SessionID)
+		if sessionID == "" {
+			return nil, nil, invalidParamsError("session_id is required")
+		}
+		filePath := strings.TrimSpace(input.FilePath)
+		if filePath == "" {
+			return nil, nil, invalidParamsError("file_path is required")
+		}
+
+		timeoutMS := defaultMCPTaskTimeoutMS
+		if input.TimeoutMS != nil {
+			timeoutMS = *input.TimeoutMS
+		}
+		if timeoutMS < minMCPTaskTimeoutMS || timeoutMS > maxMCPPythonExecTimeoutMS {
+			return nil, nil, invalidParamsError("timeout_ms must be between 1 and 600000")
+		}
+		if dispatcher == nil {
+			return nil, nil, errors.New("task dispatcher is unavailable")
+		}
+
+		timeout := time.Duration(timeoutMS) * time.Millisecond
+		validated, err := callTerminalResource(ctx, dispatcher, mcpTerminalResourcePayload{
+			SessionID: sessionID,
+			FilePath:  filePath,
+			Action:    "validate",
+		}, timeout)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		mimeType := normalizeMIME(validated.MIMEType)
+		if !isImageMIME(mimeType) {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf("unsupported mime type: %s; expected image/*", mimeType),
+					},
+				},
+			}, nil, nil
+		}
+
+		readResult, err := callTerminalResource(ctx, dispatcher, mcpTerminalResourcePayload{
+			SessionID: sessionID,
+			FilePath:  filePath,
+			Action:    "read",
+		}, timeout)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		readMIMEType := normalizeMIME(readResult.MIMEType)
+		if !isImageMIME(readMIMEType) {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf("unsupported mime type: %s; expected image/*", readMIMEType),
+					},
+				},
+			}, nil, nil
+		}
+
+		blob := append([]byte(nil), readResult.Blob...)
+		if blob == nil {
+			blob = []byte{}
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.ImageContent{
+					MIMEType: readMIMEType,
+					Data:     blob,
+				},
+			},
+		}, nil, nil
 	})
 
 	return mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {

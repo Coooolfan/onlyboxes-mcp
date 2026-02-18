@@ -39,6 +39,15 @@ The console service hosts:
       - `lease_ttl_sec` is optional and validated by worker-side lease bounds.
       - `timeout_ms` is optional, range `1..600000`, default `60000`.
       - output: `{"session_id":"...","created":true,"stdout":"...","stderr":"...","exit_code":0,"stdout_truncated":false,"stderr_truncated":false,"lease_expires_unix_ms":...}`
+    - `readImage`
+      - input: `{"session_id":"required","file_path":"required","timeout_ms":60000}`
+      - `session_id` and `file_path` are required (whitespace-only is rejected).
+      - validates file existence via worker `terminalResource` capability; directories are rejected.
+      - output is content-only (no structured output fields).
+      - image files (`image/*`) return exactly one `image` content item.
+      - non-image files return exactly one `text` content item:
+        - `unsupported mime type: <mime>; expected image/*`
+      - non-format failures (session/file missing, busy, timeout, read failure) are returned as tool errors.
 - dashboard authentication APIs:
   - `POST /api/v1/console/login` with `{"username":"...","password":"..."}`.
   - `POST /api/v1/console/logout`.

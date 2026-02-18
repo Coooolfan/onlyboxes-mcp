@@ -63,6 +63,10 @@ func TestMCPInitialize(t *testing.T) {
 	if asString(t, result["protocolVersion"]) == "" {
 		t.Fatalf("expected protocolVersion in initialize result")
 	}
+	capabilities := mustObject(t, result["capabilities"], "initialize.capabilities")
+	if _, ok := capabilities["resources"]; ok {
+		t.Fatalf("did not expect resources capability in initialize response")
+	}
 }
 
 func TestMCPToolsList(t *testing.T) {
@@ -74,8 +78,8 @@ func TestMCPToolsList(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected tools array, got %#v", result["tools"])
 	}
-	if len(toolsRaw) != 3 {
-		t.Fatalf("expected exactly 3 tools, got %d", len(toolsRaw))
+	if len(toolsRaw) != 4 {
+		t.Fatalf("expected exactly 4 tools, got %d", len(toolsRaw))
 	}
 
 	toolByName := map[string]map[string]any{}
@@ -94,6 +98,9 @@ func TestMCPToolsList(t *testing.T) {
 	}
 	if _, ok := toolByName["terminalExec"]; !ok {
 		t.Fatalf("expected tool terminalExec in tools/list")
+	}
+	if _, ok := toolByName["readImage"]; !ok {
+		t.Fatalf("expected tool readImage in tools/list")
 	}
 
 	echoTool := toolByName["echo"]
@@ -251,6 +258,20 @@ func TestMCPToolsList(t *testing.T) {
 	if got := asString(t, leaseSchema["type"]); got != "integer" {
 		t.Fatalf("expected terminalExec.lease_expires_unix_ms.type=integer, got %q", got)
 	}
+
+	readImageTool := toolByName["readImage"]
+	if got := asString(t, readImageTool["title"]); got != mcpReadImageToolTitle {
+		t.Fatalf("expected readImage title %q, got %q", mcpReadImageToolTitle, got)
+	}
+	if got := asString(t, readImageTool["description"]); got != mcpReadImageToolDescription {
+		t.Fatalf("unexpected readImage description: %q", got)
+	}
+	readImageInputSchema := mustObject(t, readImageTool["inputSchema"], "readImage.inputSchema")
+	assertRequiredContains(t, readImageInputSchema["required"], "session_id")
+	assertRequiredContains(t, readImageInputSchema["required"], "file_path")
+	if _, ok := readImageTool["outputSchema"]; ok {
+		t.Fatalf("did not expect readImage.outputSchema")
+	}
 }
 
 func TestMCPToolCallEchoSuccess(t *testing.T) {
@@ -378,6 +399,359 @@ func TestMCPToolCallTerminalExecSuccess(t *testing.T) {
 	}
 }
 
+func TestMCPToolCallReadImageSuccess(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	router := newMCPTestRouter(t, &fakeMCPDispatcher{
+		submitTask: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
+			if req.Capability != terminalResourceCapabilityName {
+				t.Fatalf("expected capability=%q, got %q", terminalResourceCapabilityName, req.Capability)
+			}
+			payload := mcpTerminalResourcePayload{}
+			if err := json.Unmarshal(req.InputJSON, &payload); err != nil {
+				t.Fatalf("expected valid terminalResource payload, got %s", string(req.InputJSON))
+			}
+			switch payload.Action {
+			case "validate":
+				resultJSON, _ := json.Marshal(mcpTerminalResourceResult{
+					SessionID: payload.SessionID,
+					FilePath:  payload.FilePath,
+					MIMEType:  "image/png",
+					SizeBytes: 4,
+				})
+				return grpcserver.SubmitTaskResult{
+					Task: grpcserver.TaskSnapshot{
+						TaskID:     "task-read-image-validate",
+						Capability: terminalResourceCapabilityName,
+						Status:     grpcserver.TaskStatusSucceeded,
+						ResultJSON: resultJSON,
+						CreatedAt:  now,
+						UpdatedAt:  now,
+						DeadlineAt: now.Add(60 * time.Second),
+					},
+					Completed: true,
+				}, nil
+			case "read":
+				resultJSON, _ := json.Marshal(mcpTerminalResourceResult{
+					SessionID: payload.SessionID,
+					FilePath:  payload.FilePath,
+					MIMEType:  "image/png",
+					SizeBytes: 4,
+					Blob:      []byte{0x89, 0x50, 0x4e, 0x47},
+				})
+				return grpcserver.SubmitTaskResult{
+					Task: grpcserver.TaskSnapshot{
+						TaskID:     "task-read-image-read",
+						Capability: terminalResourceCapabilityName,
+						Status:     grpcserver.TaskStatusSucceeded,
+						ResultJSON: resultJSON,
+						CreatedAt:  now,
+						UpdatedAt:  now,
+						DeadlineAt: now.Add(60 * time.Second),
+					},
+					Completed: true,
+				}, nil
+			default:
+				t.Fatalf("unexpected action: %q", payload.Action)
+				return grpcserver.SubmitTaskResult{}, nil
+			}
+		},
+	})
+
+	payload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"session-1","file_path":"/workspace/image.png"}}}`)
+	result := mustMapField(t, payload, "result")
+	if asBool(result["isError"]) {
+		t.Fatalf("expected tool call success, got error payload=%s", mustJSON(t, result))
+	}
+	if _, ok := result["structuredContent"]; ok {
+		t.Fatalf("did not expect structuredContent in readImage result")
+	}
+
+	contentRaw, ok := result["content"].([]any)
+	if !ok || len(contentRaw) != 1 {
+		t.Fatalf("expected [image] content, got %s", mustJSON(t, result))
+	}
+	first := mustObject(t, contentRaw[0], "readImage.content[0]")
+	if got := asString(t, first["type"]); got != "image" {
+		t.Fatalf("expected content type image, got %q", got)
+	}
+	if got := asString(t, first["mimeType"]); got != "image/png" {
+		t.Fatalf("expected image mimeType=image/png, got %q", got)
+	}
+	if got := asString(t, first["data"]); got == "" {
+		t.Fatalf("expected inline image data")
+	}
+}
+
+func TestMCPToolCallReadImageUnsupportedMIME(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	readCalled := false
+	router := newMCPTestRouter(t, &fakeMCPDispatcher{
+		submitTask: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
+			if req.Capability != terminalResourceCapabilityName {
+				t.Fatalf("expected capability=%q, got %q", terminalResourceCapabilityName, req.Capability)
+			}
+			payload := mcpTerminalResourcePayload{}
+			if err := json.Unmarshal(req.InputJSON, &payload); err != nil {
+				t.Fatalf("expected valid terminalResource payload, got %s", string(req.InputJSON))
+			}
+			if payload.Action == "read" {
+				readCalled = true
+				t.Fatalf("read should not be called for unsupported mime type")
+			}
+
+			resultJSON, _ := json.Marshal(mcpTerminalResourceResult{
+				SessionID: payload.SessionID,
+				FilePath:  payload.FilePath,
+				MIMEType:  "application/pdf",
+				SizeBytes: 4,
+			})
+			return grpcserver.SubmitTaskResult{
+				Task: grpcserver.TaskSnapshot{
+					TaskID:     "task-read-image-pdf-validate",
+					Capability: terminalResourceCapabilityName,
+					Status:     grpcserver.TaskStatusSucceeded,
+					ResultJSON: resultJSON,
+					CreatedAt:  now,
+					UpdatedAt:  now,
+					DeadlineAt: now.Add(60 * time.Second),
+				},
+				Completed: true,
+			}, nil
+		},
+	})
+
+	payload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"session-1","file_path":"/workspace/file.pdf"}}}`)
+	result := mustMapField(t, payload, "result")
+	if asBool(result["isError"]) {
+		t.Fatalf("expected tool call success, got error payload=%s", mustJSON(t, result))
+	}
+	contentRaw, ok := result["content"].([]any)
+	if !ok || len(contentRaw) != 1 {
+		t.Fatalf("expected [text] content, got %s", mustJSON(t, result))
+	}
+	first := mustObject(t, contentRaw[0], "readImage.content[0]")
+	if got := asString(t, first["type"]); got != "text" {
+		t.Fatalf("expected content type text, got %q", got)
+	}
+	if got := asString(t, first["text"]); got != "unsupported mime type: application/pdf; expected image/*" {
+		t.Fatalf("unexpected unsupported mime message: %q", got)
+	}
+	if readCalled {
+		t.Fatalf("expected unsupported mime to skip read")
+	}
+}
+
+func TestMCPToolCallReadImageReadReturnsUnsupportedMIME(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	router := newMCPTestRouter(t, &fakeMCPDispatcher{
+		submitTask: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
+			if req.Capability != terminalResourceCapabilityName {
+				t.Fatalf("expected capability=%q, got %q", terminalResourceCapabilityName, req.Capability)
+			}
+			payload := mcpTerminalResourcePayload{}
+			if err := json.Unmarshal(req.InputJSON, &payload); err != nil {
+				t.Fatalf("expected valid terminalResource payload, got %s", string(req.InputJSON))
+			}
+
+			switch payload.Action {
+			case "validate":
+				resultJSON, _ := json.Marshal(mcpTerminalResourceResult{
+					SessionID: payload.SessionID,
+					FilePath:  payload.FilePath,
+					MIMEType:  "image/png",
+					SizeBytes: 4,
+				})
+				return grpcserver.SubmitTaskResult{
+					Task: grpcserver.TaskSnapshot{
+						TaskID:     "task-read-image-mismatch-validate",
+						Capability: terminalResourceCapabilityName,
+						Status:     grpcserver.TaskStatusSucceeded,
+						ResultJSON: resultJSON,
+						CreatedAt:  now,
+						UpdatedAt:  now,
+						DeadlineAt: now.Add(60 * time.Second),
+					},
+					Completed: true,
+				}, nil
+			case "read":
+				resultJSON, _ := json.Marshal(mcpTerminalResourceResult{
+					SessionID: payload.SessionID,
+					FilePath:  payload.FilePath,
+					MIMEType:  "text/plain",
+					SizeBytes: 3,
+					Blob:      []byte("abc"),
+				})
+				return grpcserver.SubmitTaskResult{
+					Task: grpcserver.TaskSnapshot{
+						TaskID:     "task-read-image-mismatch-read",
+						Capability: terminalResourceCapabilityName,
+						Status:     grpcserver.TaskStatusSucceeded,
+						ResultJSON: resultJSON,
+						CreatedAt:  now,
+						UpdatedAt:  now,
+						DeadlineAt: now.Add(60 * time.Second),
+					},
+					Completed: true,
+				}, nil
+			default:
+				t.Fatalf("unexpected action: %q", payload.Action)
+				return grpcserver.SubmitTaskResult{}, nil
+			}
+		},
+	})
+
+	payload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"session-1","file_path":"/workspace/image.png"}}}`)
+	result := mustMapField(t, payload, "result")
+	if asBool(result["isError"]) {
+		t.Fatalf("expected tool call success, got error payload=%s", mustJSON(t, result))
+	}
+	contentRaw, ok := result["content"].([]any)
+	if !ok || len(contentRaw) != 1 {
+		t.Fatalf("expected [text] content, got %s", mustJSON(t, result))
+	}
+	first := mustObject(t, contentRaw[0], "readImage.content[0]")
+	if got := asString(t, first["type"]); got != "text" {
+		t.Fatalf("expected content type text, got %q", got)
+	}
+	if got := asString(t, first["text"]); got != "unsupported mime type: text/plain; expected image/*" {
+		t.Fatalf("unexpected unsupported mime message: %q", got)
+	}
+}
+
+func TestMCPToolCallReadImageReadFailuresAreToolErrors(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	tests := []struct {
+		name      string
+		status    grpcserver.TaskStatus
+		errorCode string
+		errorMsg  string
+		wantText  string
+	}{
+		{
+			name:      "file_too_large",
+			status:    grpcserver.TaskStatusFailed,
+			errorCode: "file_too_large",
+			errorMsg:  "file too large",
+			wantText:  "file_too_large: file too large",
+		},
+		{
+			name:      "task_timeout",
+			status:    grpcserver.TaskStatusTimeout,
+			errorCode: "",
+			errorMsg:  "",
+			wantText:  "task timed out",
+		},
+		{
+			name:      "session_busy",
+			status:    grpcserver.TaskStatusFailed,
+			errorCode: terminalExecSessionBusyCode,
+			errorMsg:  "session busy",
+			wantText:  terminalExecSessionBusyCode + ": session busy",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			router := newMCPTestRouter(t, &fakeMCPDispatcher{
+				submitTask: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
+					if req.Capability != terminalResourceCapabilityName {
+						t.Fatalf("expected capability=%q, got %q", terminalResourceCapabilityName, req.Capability)
+					}
+					payload := mcpTerminalResourcePayload{}
+					if err := json.Unmarshal(req.InputJSON, &payload); err != nil {
+						t.Fatalf("expected valid terminalResource payload, got %s", string(req.InputJSON))
+					}
+
+					if payload.Action == "validate" {
+						resultJSON, _ := json.Marshal(mcpTerminalResourceResult{
+							SessionID: payload.SessionID,
+							FilePath:  payload.FilePath,
+							MIMEType:  "image/png",
+							SizeBytes: 4,
+						})
+						return grpcserver.SubmitTaskResult{
+							Task: grpcserver.TaskSnapshot{
+								TaskID:     "task-read-image-validate",
+								Capability: terminalResourceCapabilityName,
+								Status:     grpcserver.TaskStatusSucceeded,
+								ResultJSON: resultJSON,
+								CreatedAt:  now,
+								UpdatedAt:  now,
+								DeadlineAt: now.Add(60 * time.Second),
+							},
+							Completed: true,
+						}, nil
+					}
+					return grpcserver.SubmitTaskResult{
+						Task: grpcserver.TaskSnapshot{
+							TaskID:       "task-read-image-read",
+							Capability:   terminalResourceCapabilityName,
+							Status:       tc.status,
+							ErrorCode:    tc.errorCode,
+							ErrorMessage: tc.errorMsg,
+							CreatedAt:    now,
+							UpdatedAt:    now,
+							DeadlineAt:   now.Add(60 * time.Second),
+						},
+						Completed: true,
+					}, nil
+				},
+			})
+
+			payload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"session-1","file_path":"/workspace/image.png"}}}`)
+			assertMCPToolError(t, payload, tc.wantText)
+		})
+	}
+}
+
+func TestMCPToolCallReadImageValidationErrors(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	tests := []struct {
+		name      string
+		errorCode string
+		errorMsg  string
+	}{
+		{
+			name:      "file_not_found",
+			errorCode: "file_not_found",
+			errorMsg:  "file not found",
+		},
+		{
+			name:      "path_is_directory",
+			errorCode: "path_is_directory",
+			errorMsg:  "path is directory",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			router := newMCPTestRouter(t, &fakeMCPDispatcher{
+				submitTask: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
+					if req.Capability != terminalResourceCapabilityName {
+						t.Fatalf("expected capability=%q, got %q", terminalResourceCapabilityName, req.Capability)
+					}
+					return grpcserver.SubmitTaskResult{
+						Task: grpcserver.TaskSnapshot{
+							TaskID:       "task-read-image-error",
+							Capability:   terminalResourceCapabilityName,
+							Status:       grpcserver.TaskStatusFailed,
+							ErrorCode:    tc.errorCode,
+							ErrorMessage: tc.errorMsg,
+							CreatedAt:    now,
+							UpdatedAt:    now,
+							DeadlineAt:   now.Add(60 * time.Second),
+						},
+						Completed: true,
+					}, nil
+				},
+			})
+
+			payload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"session-1","file_path":"/workspace/a.txt"}}}`)
+			assertMCPToolError(t, payload, tc.errorCode+": "+tc.errorMsg)
+		})
+	}
+}
+
 func TestMCPToolCallInvalidParams(t *testing.T) {
 	router := newMCPTestRouter(t, &fakeMCPDispatcher{})
 
@@ -398,6 +772,12 @@ func TestMCPToolCallInvalidParams(t *testing.T) {
 
 	terminalUnknownField := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"terminalExec","arguments":{"command":"pwd","unknown":"x"}}}`)
 	assertMCPInvalidParamsError(t, terminalUnknownField)
+
+	registerBlankSession := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"  ","file_path":"/workspace/a.txt"}}}`)
+	assertMCPInvalidParamsError(t, registerBlankSession)
+
+	registerUnknownField := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"session-1","file_path":"/workspace/a.txt","unknown":"x"}}}`)
+	assertMCPInvalidParamsError(t, registerUnknownField)
 }
 
 func TestMCPToolCallBackendErrorsAsToolErrors(t *testing.T) {
@@ -407,11 +787,11 @@ func TestMCPToolCallBackendErrorsAsToolErrors(t *testing.T) {
 			return "", grpcserver.ErrNoEchoWorker
 		},
 		submitTask: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
-			if req.Capability == terminalExecCapabilityName {
+			if req.Capability == terminalExecCapabilityName || req.Capability == terminalResourceCapabilityName {
 				return grpcserver.SubmitTaskResult{
 					Task: grpcserver.TaskSnapshot{
 						TaskID:       "task-3",
-						Capability:   terminalExecCapabilityName,
+						Capability:   req.Capability,
 						Status:       grpcserver.TaskStatusFailed,
 						ErrorCode:    terminalExecSessionNotFoundCode,
 						ErrorMessage: "session not found",
@@ -446,6 +826,9 @@ func TestMCPToolCallBackendErrorsAsToolErrors(t *testing.T) {
 
 	terminalPayload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"terminalExec","arguments":{"command":"pwd","session_id":"missing"}}}`)
 	assertMCPToolError(t, terminalPayload, terminalExecSessionNotFoundCode+": session not found")
+
+	resourcePayload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"missing","file_path":"/workspace/a.txt"}}}`)
+	assertMCPToolError(t, resourcePayload, terminalExecSessionNotFoundCode+": session not found")
 }
 
 func TestMCPGetReturnsMethodNotAllowed(t *testing.T) {

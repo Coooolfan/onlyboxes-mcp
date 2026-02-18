@@ -53,6 +53,7 @@ var waitReconnect = waitReconnectDelay
 var applyJitter = jitterDuration
 var runPythonExec = runPythonExecInDocker
 var runTerminalExec = runTerminalExecUnavailable
+var runTerminalResource = runTerminalResourceUnavailable
 var runDockerCommand = runDockerCommandCLI
 var pythonExecContainerNameFn = newPythonExecContainerName
 
@@ -76,8 +77,11 @@ func Run(ctx context.Context, cfg config.Config) error {
 	})
 	originalRunTerminalExec := runTerminalExec
 	runTerminalExec = terminalManager.Execute
+	originalRunTerminalResource := runTerminalResource
+	runTerminalResource = terminalManager.ResolveResource
 	defer func() {
 		runTerminalExec = originalRunTerminalExec
+		runTerminalResource = originalRunTerminalResource
 		terminalManager.Close()
 	}()
 
@@ -250,6 +254,14 @@ func receiverLoop(
 					capability,
 					len(dispatch.GetPayloadJson()),
 				)
+			case capability == terminalResourceCapabilityName:
+				log.Printf(
+					"command dispatch received: node_id=%s command_id=%s capability=%s payload_len=%d",
+					nodeID,
+					commandID,
+					capability,
+					len(dispatch.GetPayloadJson()),
+				)
 			default:
 				log.Printf(
 					"command dispatch received: node_id=%s command_id=%s capability=%s",
@@ -374,6 +386,8 @@ func buildCommandResultWithContext(baseCtx context.Context, dispatch *registryv1
 		return buildPythonExecCommandResult(baseCtx, commandID, dispatch)
 	case terminalExecCapabilityName:
 		return buildTerminalExecCommandResult(baseCtx, commandID, dispatch)
+	case terminalResourceCapabilityName:
+		return buildTerminalResourceCommandResult(baseCtx, commandID, dispatch)
 	default:
 		return commandErrorResult(commandID, "unsupported_capability", fmt.Sprintf("capability %q is not supported", dispatch.GetCapability()))
 	}
@@ -535,6 +549,62 @@ func buildTerminalExecCommandResult(baseCtx context.Context, commandID string, d
 	resultPayload, err := json.Marshal(execResult)
 	if err != nil {
 		return commandErrorResult(commandID, "encode_failed", "failed to encode terminalExec payload")
+	}
+
+	return &registryv1.ConnectRequest{
+		Payload: &registryv1.ConnectRequest_CommandResult{
+			CommandResult: &registryv1.CommandResult{
+				CommandId:       commandID,
+				PayloadJson:     resultPayload,
+				CompletedUnixMs: time.Now().UnixMilli(),
+			},
+		},
+	}
+}
+
+func buildTerminalResourceCommandResult(baseCtx context.Context, commandID string, dispatch *registryv1.CommandDispatch) *registryv1.ConnectRequest {
+	payload := append([]byte(nil), dispatch.GetPayloadJson()...)
+	if len(payload) == 0 {
+		return commandErrorResult(commandID, terminalExecCodeInvalidPayload, "terminalResource payload is required")
+	}
+
+	decoded := terminalResourcePayload{}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return commandErrorResult(commandID, terminalExecCodeInvalidPayload, "payload_json is not valid terminalResource payload")
+	}
+	if strings.TrimSpace(decoded.SessionID) == "" || strings.TrimSpace(decoded.FilePath) == "" {
+		return commandErrorResult(commandID, terminalExecCodeInvalidPayload, "terminalResource session_id and file_path are required")
+	}
+
+	commandCtx := baseCtx
+	if commandCtx == nil {
+		commandCtx = context.Background()
+	}
+	cancel := func() {}
+	if deadlineUnixMS := dispatch.GetDeadlineUnixMs(); deadlineUnixMS > 0 {
+		commandCtx, cancel = context.WithDeadline(commandCtx, time.UnixMilli(deadlineUnixMS))
+	}
+	defer cancel()
+
+	resourceResult, err := runTerminalResource(commandCtx, terminalResourceRequest{
+		SessionID: decoded.SessionID,
+		FilePath:  decoded.FilePath,
+		Action:    decoded.Action,
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return commandErrorResult(commandID, "deadline_exceeded", "command deadline exceeded")
+		}
+		var terminalErr *terminalExecError
+		if errors.As(err, &terminalErr) {
+			return commandErrorResult(commandID, terminalErr.Code(), terminalErr.Error())
+		}
+		return commandErrorResult(commandID, "execution_failed", fmt.Sprintf("terminalResource execution failed: %v", err))
+	}
+
+	resultPayload, err := json.Marshal(resourceResult)
+	if err != nil {
+		return commandErrorResult(commandID, "encode_failed", "failed to encode terminalResource payload")
 	}
 
 	return &registryv1.ConnectRequest{
@@ -808,6 +878,10 @@ func buildHello(cfg config.Config) (*registryv1.ConnectHello, error) {
 				Name:        terminalExecCapabilityDeclared,
 				MaxInflight: defaultMaxInflight,
 			},
+			{
+				Name:        terminalResourceCapabilityDeclared,
+				MaxInflight: defaultMaxInflight,
+			},
 		},
 	}
 	hello.Signature = registryauth.Sign(hello.GetNodeId(), hello.GetTimestampUnixMs(), hello.GetNonce(), cfg.WorkerSecret)
@@ -816,6 +890,10 @@ func buildHello(cfg config.Config) (*registryv1.ConnectHello, error) {
 
 func runTerminalExecUnavailable(context.Context, terminalExecRequest) (terminalExecRunResult, error) {
 	return terminalExecRunResult{}, newTerminalExecError("execution_failed", terminalExecNotReadyMessage)
+}
+
+func runTerminalResourceUnavailable(context.Context, terminalResourceRequest) (terminalResourceRunResult, error) {
+	return terminalResourceRunResult{}, newTerminalExecError("execution_failed", terminalExecNotReadyMessage)
 }
 
 func enqueueRequest(ctx context.Context, outbound chan<- *registryv1.ConnectRequest, req *registryv1.ConnectRequest) error {
