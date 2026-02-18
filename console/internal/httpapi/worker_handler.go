@@ -99,6 +99,7 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 		api.GET("/workers/stats", workerHandler.WorkerStats)
 		api.POST("/workers", workerHandler.CreateWorker)
 		api.DELETE("/workers/:node_id", workerHandler.DeleteWorker)
+		registerEmbeddedWebRoutes(router)
 		return router
 	}
 
@@ -116,6 +117,8 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 	dashboard.POST("/console/tokens", mcpAuth.CreateToken)
 	dashboard.DELETE("/console/tokens/:token_id", mcpAuth.DeleteToken)
 	dashboard.GET("/console/tokens/:token_id/value", mcpAuth.GetTokenValue)
+
+	registerEmbeddedWebRoutes(router)
 
 	return router
 }

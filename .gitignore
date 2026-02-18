@@ -34,4 +34,6 @@ web/.eslintcache
 web/.yarn/install-state.gz
 web/*.local
 web/*.tsbuildinfo
+console/internal/httpapi/web_dist/*
+!console/internal/httpapi/web_dist/index.html
 worker-credentials.json

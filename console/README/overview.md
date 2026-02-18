@@ -2,6 +2,11 @@
 
 The console service hosts:
 - a gRPC registry endpoint with bidirectional stream `Connect` for worker registration + heartbeat + command dispatch/result.
+- embedded web dashboard static hosting:
+  - `GET /` serves embedded `web` frontend.
+  - `GET /assets/*` serves bundled static assets.
+  - non-API `GET/HEAD` routes use SPA fallback (`index.html`).
+  - `/api/*` and `/mcp` are excluded from SPA fallback.
 - REST APIs for worker data (dashboard, authentication required):
   - `GET /api/v1/workers` for paginated worker listing.
   - `GET /api/v1/workers/stats` for aggregated worker status metrics.

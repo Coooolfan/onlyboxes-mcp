@@ -1,0 +1,127 @@
+name: package-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version string used in output filenames
+        required: true
+        type: string
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            version_raw="${{ inputs.version }}"
+          else
+            version_raw="${{ github.event.release.tag_name }}"
+          fi
+          if [[ -z "${version_raw}" ]]; then
+            echo "version is required" >&2
+            exit 1
+          fi
+
+          version_safe="$(printf '%s' "${version_raw}" | sed -E 's/[^A-Za-z0-9._-]+/-/g')"
+          if [[ -z "${version_safe}" ]]; then
+            echo "sanitized version is empty" >&2
+            exit 1
+          fi
+
+          console_bin="onlyboxes-console_${version_safe}_linux_amd64"
+          worker_bin="onlyboxes-worker-docker_${version_safe}_linux_amd64"
+
+          echo "version_raw=${version_raw}" >> "${GITHUB_OUTPUT}"
+          echo "version_safe=${version_safe}" >> "${GITHUB_OUTPUT}"
+          echo "console_bin=${console_bin}" >> "${GITHUB_OUTPUT}"
+          echo "worker_bin=${worker_bin}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Build web
+        shell: bash
+        run: |
+          set -euo pipefail
+          yarn --cwd web install --immutable
+          yarn --cwd web build
+
+      - name: Sync web dist into console embedded assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf console/internal/httpapi/web_dist
+          mkdir -p console/internal/httpapi/web_dist
+          cp -R web/dist/. console/internal/httpapi/web_dist/
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Build linux amd64 binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          (
+            cd console
+            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "../build/${{ steps.version.outputs.console_bin }}" ./cmd/console
+          )
+          (
+            cd worker/worker-docker
+            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "../../build/${{ steps.version.outputs.worker_bin }}" ./cmd/worker-docker
+          )
+
+      - name: Validate ELF architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          console_info="$(file "build/${{ steps.version.outputs.console_bin }}")"
+          worker_info="$(file "build/${{ steps.version.outputs.worker_bin }}")"
+          echo "${console_info}"
+          echo "${worker_info}"
+          grep -Eq "ELF 64-bit.*x86-64" <<< "${console_info}"
+          grep -Eq "ELF 64-bit.*x86-64" <<< "${worker_info}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onlyboxes-linux-amd64-${{ steps.version.outputs.version_safe }}
+          path: |
+            build/${{ steps.version.outputs.console_bin }}
+            build/${{ steps.version.outputs.worker_bin }}
+          if-no-files-found: error
+
+      - name: Upload release assets
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${{ steps.version.outputs.version_raw }}" \
+            "build/${{ steps.version.outputs.console_bin }}" \
+            "build/${{ steps.version.outputs.worker_bin }}" \
+            --clobber
