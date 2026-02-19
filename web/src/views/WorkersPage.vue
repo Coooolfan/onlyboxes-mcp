@@ -141,11 +141,9 @@ onBeforeUnmount(() => {
       :tokens="workersStore.trustedTokens"
       :creating-token="workersStore.creatingTrustedToken"
       :deleting-token-id="workersStore.deletingTrustedTokenID"
-      :copying-token-id="workersStore.copyingTrustedTokenID"
-      :copy-button-text="workersStore.trustedTokenCopyButtonText"
       :delete-button-text="workersStore.trustedTokenDeleteButtonText"
-      @create-token="workersStore.createTrustedToken"
-      @copy-token="workersStore.copyTrustedToken"
+      :create-token="workersStore.createTrustedToken"
+      :format-date-time="workersStore.formatDateTime"
       @delete-token="workersStore.deleteTrustedToken"
     />
 

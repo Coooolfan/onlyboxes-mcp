@@ -60,13 +60,6 @@ export interface TrustedTokenCreateResponse {
   updated_at: string
 }
 
-export interface TrustedTokenValueResponse {
-  id: string
-  name: string
-  token: string
-}
-
 export interface TrustedTokenCreateInput {
   name: string
-  token?: string
 }

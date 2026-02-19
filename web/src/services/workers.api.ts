@@ -3,7 +3,6 @@ import type {
   TrustedTokenCreateInput,
   TrustedTokenCreateResponse,
   TrustedTokenListResponse,
-  TrustedTokenValueResponse,
   WorkerListResponse,
   WorkerStartupCommandResponse,
   WorkerStatsResponse,
@@ -135,7 +134,6 @@ export async function createTrustedTokenAPI(input: TrustedTokenCreateInput): Pro
     },
     body: JSON.stringify({
       name: input.name,
-      token: input.token,
     }),
   })
 
@@ -166,23 +164,5 @@ export async function deleteTrustedTokenAPI(tokenID: string): Promise<void> {
 
   if (!response.ok) {
     throw new Error(await parseAPIError(response))
-  }
-}
-
-export async function fetchTrustedTokenValueAPI(tokenID: string): Promise<TrustedTokenValueResponse> {
-  const response = await request(`/api/v1/console/tokens/${encodeURIComponent(tokenID)}/value`)
-  if (!response.ok) {
-    throw new Error(await parseAPIError(response))
-  }
-
-  const payload = (await response.json()) as TrustedTokenValueResponse
-  const tokenValue = payload.token?.trim()
-  if (!tokenValue) {
-    throw new Error('API returned empty token value.')
-  }
-  return {
-    id: payload.id ?? tokenID,
-    name: payload.name ?? '',
-    token: tokenValue,
   }
 }

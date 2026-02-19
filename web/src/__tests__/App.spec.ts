@@ -47,12 +47,6 @@ const trustedTokensPayload = {
   total: 1,
 }
 
-const trustedTokenValuePayload = {
-  id: 'tok-1',
-  name: 'ci-prod',
-  token: 'obx_1234567890abcdef',
-}
-
 function jsonResponse(payload: unknown) {
   return {
     ok: true,
@@ -197,13 +191,7 @@ describe('App', () => {
     wrapper.unmount()
   })
 
-  it('shows trusted tokens and copies token value from value API', async () => {
-    const writeText = vi.fn(async () => {})
-    Object.defineProperty(window.navigator, 'clipboard', {
-      value: { writeText },
-      configurable: true,
-    })
-
+  it('shows trusted tokens collapsed by default and expands to summary list', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.startsWith('/api/v1/workers/stats')) {
@@ -215,27 +203,33 @@ describe('App', () => {
       if (url === '/api/v1/console/tokens') {
         return jsonResponse(trustedTokensPayload)
       }
-      if (url === '/api/v1/console/tokens/tok-1/value') {
-        return jsonResponse(trustedTokenValuePayload)
-      }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const wrapper = await mountApp('/workers')
 
-    expect(wrapper.text()).toContain('ci-prod')
-    expect(wrapper.text()).toContain('obx_****9fa1')
-    const copyTokenBtn = wrapper.findAll('button').find((button) => button.text() === 'Copy')
-    expect(copyTokenBtn).toBeTruthy()
-    await copyTokenBtn?.trigger('click')
+    expect(wrapper.text()).toContain('Trusted Tokens')
+    expect(wrapper.text()).toContain('列表已折叠')
+    expect(wrapper.text()).not.toContain('ci-prod')
+
+    const expandBtn = wrapper.findAll('button').find((button) => button.text() === 'Expand')
+    expect(expandBtn).toBeTruthy()
+    await expandBtn?.trigger('click')
     await flushPromises()
 
-    expect(writeText).toHaveBeenCalledWith('obx_1234567890abcdef')
+    expect(wrapper.text()).toContain('ci-prod')
+    expect(wrapper.text()).toContain('obx_****9fa1')
     wrapper.unmount()
   })
 
-  it('creates trusted token from dashboard form', async () => {
+  it('creates trusted token in modal and only exposes plaintext once', async () => {
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+
     let tokens = [...trustedTokensPayload.items]
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
@@ -262,9 +256,9 @@ describe('App', () => {
         return jsonResponse({
           id: 'tok-2',
           name: 'ci-staging',
-          token: 'manual-token',
+          token: 'obx_plaintext_once',
           token_masked: 'manu****oken',
-          generated: false,
+          generated: true,
           created_at: '2026-02-16T10:01:00Z',
           updated_at: '2026-02-16T10:01:00Z',
         })
@@ -274,21 +268,49 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const wrapper = await mountApp('/workers')
-    const inputs = wrapper.findAll('input')
-    expect(inputs.length).toBeGreaterThanOrEqual(2)
-    await inputs[0]?.setValue('ci-staging')
-    await inputs[1]?.setValue('manual-token')
 
-    const form = wrapper.find('form.token-form')
-    expect(form.exists()).toBe(true)
-    await form.trigger('submit.prevent')
+    const newTokenBtn = wrapper.findAll('button').find((button) => button.text() === 'New Token')
+    expect(newTokenBtn).toBeTruthy()
+    await newTokenBtn?.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('ci-staging')
+    const nameInput = wrapper.find('.token-modal input')
+    expect(nameInput.exists()).toBe(true)
+    await nameInput.setValue('ci-staging')
+
+    const modalForm = wrapper.find('form.token-modal-form')
+    expect(modalForm.exists()).toBe(true)
+    await modalForm.trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Token Created')
+    expect(wrapper.text()).toContain('obx_plaintext_once')
+
     const createCall = fetchMock.mock.calls.find(
       ([url, init]) => String(url) === '/api/v1/console/tokens' && (init as RequestInit | undefined)?.method === 'POST',
     )
     expect(createCall).toBeTruthy()
+    if (!createCall) {
+      throw new Error('missing trusted token create call')
+    }
+    const requestBody = JSON.parse(String((createCall[1] as RequestInit | undefined)?.body ?? '{}'))
+    expect(requestBody).toEqual({ name: 'ci-staging' })
+    expect('token' in requestBody).toBe(false)
+
+    const copyBtn = wrapper.findAll('button').find((button) => button.text() === 'Copy Token')
+    expect(copyBtn).toBeTruthy()
+    await copyBtn?.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('obx_plaintext_once')
+
+    const doneBtn = wrapper.findAll('button').find((button) => button.text() === 'Done')
+    expect(doneBtn).toBeTruthy()
+    await doneBtn?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('obx_plaintext_once')
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/v1/console/tokens/tok-2/value'))).toBe(false)
+
     wrapper.unmount()
   })
 
@@ -316,11 +338,17 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const wrapper = await mountApp('/workers')
+    expect(wrapper.text()).not.toContain('ci-prod')
+
+    const expandBtn = wrapper.findAll('button').find((button) => button.text() === 'Expand')
+    expect(expandBtn).toBeTruthy()
+    await expandBtn?.trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('ci-prod')
 
-    const deleteBtn = wrapper.findAll('button').find((button) => button.text() === 'Delete')
-    expect(deleteBtn).toBeTruthy()
-    await deleteBtn?.trigger('click')
+    const deleteBtn = wrapper.find('.token-panel .token-actions button')
+    expect(deleteBtn.exists()).toBe(true)
+    await deleteBtn.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('ci-prod')

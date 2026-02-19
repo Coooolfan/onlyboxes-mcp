@@ -8,7 +8,6 @@ import {
   createWorkerAPI,
   deleteTrustedTokenAPI,
   deleteWorkerAPI,
-  fetchTrustedTokenValueAPI,
   fetchTrustedTokensAPI,
   fetchWorkersAPI,
   fetchWorkerStartupCommandAPI,
@@ -16,6 +15,7 @@ import {
 } from '@/services/workers.api'
 import { useAuthStore } from '@/stores/auth'
 import type {
+  TrustedTokenCreateResponse,
   TrustedTokenItem,
   WorkerItem,
   WorkerListResponse,
@@ -23,6 +23,7 @@ import type {
   WorkerStatsResponse,
   WorkerStatus,
 } from '@/types/workers'
+import { writeTextToClipboard } from '@/utils/clipboard'
 
 const pageSize = 25
 const staleAfterDefaultSec = 30
@@ -54,34 +55,6 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
-async function writeTextToClipboard(text: string): Promise<void> {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-
-  if (typeof document === 'undefined') {
-    throw new Error('Clipboard API unavailable.')
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.top = '0'
-  textarea.style.left = '-9999px'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.focus()
-  textarea.select()
-
-  const copied = document.execCommand('copy')
-  document.body.removeChild(textarea)
-  if (!copied) {
-    throw new Error('Failed to copy startup command.')
-  }
-}
-
 export const useWorkersStore = defineStore('workers', () => {
   const statusFilter = ref<WorkerStatus>('all')
   const page = ref(1)
@@ -97,8 +70,6 @@ export const useWorkersStore = defineStore('workers', () => {
   const copyFailedNodeID = ref('')
   const creatingTrustedToken = ref(false)
   const deletingTrustedTokenID = ref('')
-  const copyingTrustedTokenID = ref('')
-  const copiedTrustedTokenID = ref('')
 
   const dashboardStats = ref<WorkerStatsResponse>(emptyStats())
   const currentList = ref<WorkerListResponse | null>(null)
@@ -108,7 +79,6 @@ export const useWorkersStore = defineStore('workers', () => {
   let loadRequestSerial = 0
   let activeController: AbortController | null = null
   let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null
-  let trustedTokenCopyFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 
   const totalWorkers = computed(() => dashboardStats.value.total)
   const onlineWorkers = computed(() => dashboardStats.value.online)
@@ -153,25 +123,6 @@ export const useWorkersStore = defineStore('workers', () => {
     copyFailedNodeID.value = ''
   }
 
-  function scheduleTrustedTokenCopyFeedbackReset(): void {
-    if (trustedTokenCopyFeedbackTimer) {
-      clearTimeout(trustedTokenCopyFeedbackTimer)
-    }
-    trustedTokenCopyFeedbackTimer = setTimeout(() => {
-      copiedTrustedTokenID.value = ''
-      trustedTokenCopyFeedbackTimer = null
-    }, 1500)
-  }
-
-  function resetTrustedTokenCopyFeedback(): void {
-    if (trustedTokenCopyFeedbackTimer) {
-      clearTimeout(trustedTokenCopyFeedbackTimer)
-      trustedTokenCopyFeedbackTimer = null
-    }
-    copyingTrustedTokenID.value = ''
-    copiedTrustedTokenID.value = ''
-  }
-
   function resetDashboard(): void {
     currentList.value = null
     dashboardStats.value = emptyStats()
@@ -184,7 +135,6 @@ export const useWorkersStore = defineStore('workers', () => {
     const authStore = useAuthStore()
     authStore.logoutLocal()
     resetCopyFeedback()
-    resetTrustedTokenCopyFeedback()
     resetDashboard()
     errorMessage.value = ''
 
@@ -303,16 +253,6 @@ export const useWorkersStore = defineStore('workers', () => {
     return 'Delete'
   }
 
-  function trustedTokenCopyButtonText(tokenID: string): string {
-    if (copyingTrustedTokenID.value === tokenID) {
-      return 'Copying...'
-    }
-    if (copiedTrustedTokenID.value === tokenID) {
-      return 'Copied'
-    }
-    return 'Copy'
-  }
-
   function trustedTokenDeleteButtonText(tokenID: string): string {
     if (deletingTrustedTokenID.value === tokenID) {
       return 'Deleting...'
@@ -391,7 +331,9 @@ export const useWorkersStore = defineStore('workers', () => {
     copyingNodeID.value = nodeID
     try {
       const command = await fetchWorkerStartupCommandAPI(nodeID)
-      await writeTextToClipboard(command)
+      await writeTextToClipboard(command, {
+        fallbackErrorMessage: 'Failed to copy startup command.',
+      })
       copiedNodeID.value = nodeID
       scheduleCopyFeedbackReset()
     } catch (error) {
@@ -425,7 +367,9 @@ export const useWorkersStore = defineStore('workers', () => {
 
     try {
       const payload: WorkerStartupCommandResponse = await createWorkerAPI()
-      await writeTextToClipboard(payload.command)
+      await writeTextToClipboard(payload.command, {
+        fallbackErrorMessage: 'Failed to copy startup command.',
+      })
       copiedNodeID.value = payload.node_id
       scheduleCopyFeedbackReset()
       await loadDashboard()
@@ -479,33 +423,39 @@ export const useWorkersStore = defineStore('workers', () => {
     }
   }
 
-  async function createTrustedToken(payload: { name: string; token?: string }): Promise<void> {
+  async function createTrustedToken(payload: { name: string }): Promise<TrustedTokenCreateResponse> {
     if (creatingTrustedToken.value) {
-      return
+      throw new Error('Trusted token creation already in progress.')
     }
 
     const name = payload.name.trim()
-    const token = payload.token?.trim() ?? ''
     if (!name) {
       errorMessage.value = 'name is required'
-      return
+      throw new Error('name is required')
     }
 
     creatingTrustedToken.value = true
     errorMessage.value = ''
 
     try {
-      await createTrustedTokenAPI({
+      const created = await createTrustedTokenAPI({
         name,
-        token: token === '' ? undefined : token,
       })
+      const tokenValue = created.token.trim()
+      if (!tokenValue) {
+        throw new Error('API returned empty token value.')
+      }
       await loadDashboard()
+      return {
+        ...created,
+        token: tokenValue,
+      }
     } catch (error) {
       if (isUnauthorizedError(error)) {
         await redirectToLogin()
-        return
       }
       errorMessage.value = error instanceof Error ? error.message : 'Failed to create trusted token.'
+      throw error
     } finally {
       creatingTrustedToken.value = false
     }
@@ -527,9 +477,6 @@ export const useWorkersStore = defineStore('workers', () => {
     errorMessage.value = ''
     try {
       await deleteTrustedTokenAPI(tokenID)
-      if (copiedTrustedTokenID.value === tokenID || copyingTrustedTokenID.value === tokenID) {
-        resetTrustedTokenCopyFeedback()
-      }
       await loadDashboard()
     } catch (error) {
       if (isUnauthorizedError(error)) {
@@ -540,38 +487,6 @@ export const useWorkersStore = defineStore('workers', () => {
     } finally {
       if (deletingTrustedTokenID.value === tokenID) {
         deletingTrustedTokenID.value = ''
-      }
-    }
-  }
-
-  async function copyTrustedToken(tokenID: string): Promise<void> {
-    const targetID = tokenID.trim()
-    if (!targetID || copyingTrustedTokenID.value === targetID) {
-      return
-    }
-
-    if (trustedTokenCopyFeedbackTimer) {
-      clearTimeout(trustedTokenCopyFeedbackTimer)
-      trustedTokenCopyFeedbackTimer = null
-    }
-    copiedTrustedTokenID.value = ''
-    errorMessage.value = ''
-    copyingTrustedTokenID.value = targetID
-
-    try {
-      const payload = await fetchTrustedTokenValueAPI(targetID)
-      await writeTextToClipboard(payload.token)
-      copiedTrustedTokenID.value = targetID
-      scheduleTrustedTokenCopyFeedbackReset()
-    } catch (error) {
-      if (isUnauthorizedError(error)) {
-        await redirectToLogin()
-        return
-      }
-      errorMessage.value = error instanceof Error ? error.message : 'Failed to copy trusted token.'
-    } finally {
-      if (copyingTrustedTokenID.value === targetID) {
-        copyingTrustedTokenID.value = ''
       }
     }
   }
@@ -620,7 +535,6 @@ export const useWorkersStore = defineStore('workers', () => {
     activeController?.abort()
     stopAutoRefresh()
     resetCopyFeedback()
-    resetTrustedTokenCopyFeedback()
   }
 
   return {
@@ -638,8 +552,6 @@ export const useWorkersStore = defineStore('workers', () => {
     copyFailedNodeID,
     creatingTrustedToken,
     deletingTrustedTokenID,
-    copyingTrustedTokenID,
-    copiedTrustedTokenID,
     dashboardStats,
     currentList,
     trustedTokens,
@@ -660,7 +572,6 @@ export const useWorkersStore = defineStore('workers', () => {
     nextPage,
     startupCopyButtonText,
     deleteWorkerButtonText,
-    trustedTokenCopyButtonText,
     trustedTokenDeleteButtonText,
     formatDateTime,
     formatAge,
@@ -671,7 +582,6 @@ export const useWorkersStore = defineStore('workers', () => {
     deleteWorker,
     createTrustedToken,
     deleteTrustedToken,
-    copyTrustedToken,
     toggleAutoRefresh,
     startAutoRefresh,
     stopAutoRefresh,
