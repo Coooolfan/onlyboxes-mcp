@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -324,10 +325,10 @@ func TestListTrustedTokensSuccess(t *testing.T) {
 	mcpAuth := newBareTestMCPAuth()
 	tokenA := "token-a"
 	tokenB := "token-b"
-	if _, _, err := mcpAuth.createToken("token-a", &tokenA); err != nil {
+	if _, _, err := mcpAuth.createToken(context.Background(), testDashboardAccountID, "token-a", &tokenA); err != nil {
 		t.Fatalf("seed token-a failed: %v", err)
 	}
-	if _, _, err := mcpAuth.createToken("token-b", &tokenB); err != nil {
+	if _, _, err := mcpAuth.createToken(context.Background(), testDashboardAccountID, "token-b", &tokenB); err != nil {
 		t.Fatalf("seed token-b failed: %v", err)
 	}
 	router := NewRouter(handler, newTestConsoleAuth(t), mcpAuth)
@@ -352,11 +353,18 @@ func TestListTrustedTokensSuccess(t *testing.T) {
 	if len(payload.Items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(payload.Items))
 	}
-	if payload.Items[0].Name != "token-a" || payload.Items[1].Name != "token-b" {
-		t.Fatalf("unexpected token names: %#v", payload.Items)
+	tokenNames := map[string]struct{}{}
+	for _, item := range payload.Items {
+		tokenNames[item.Name] = struct{}{}
+		if item.TokenMasked != "*******" {
+			t.Fatalf("unexpected masked token payload: %#v", payload.Items)
+		}
 	}
-	if payload.Items[0].TokenMasked != "*******" || payload.Items[1].TokenMasked != "*******" {
-		t.Fatalf("unexpected masked token payload: %#v", payload.Items)
+	if _, ok := tokenNames["token-a"]; !ok {
+		t.Fatalf("token-a not found in list: %#v", payload.Items)
+	}
+	if _, ok := tokenNames["token-b"]; !ok {
+		t.Fatalf("token-b not found in list: %#v", payload.Items)
 	}
 }
 

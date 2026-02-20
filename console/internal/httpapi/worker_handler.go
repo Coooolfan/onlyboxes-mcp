@@ -104,18 +104,23 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 
 	api.POST("/console/login", consoleAuth.Login)
 	api.POST("/console/logout", consoleAuth.Logout)
+	api.GET("/console/session", consoleAuth.RequireAuth(), consoleAuth.Session)
 
 	dashboard := api.Group("/")
 	dashboard.Use(consoleAuth.RequireAuth())
-	dashboard.GET("/workers", workerHandler.ListWorkers)
-	dashboard.GET("/workers/stats", workerHandler.WorkerStats)
-	dashboard.POST("/workers", workerHandler.CreateWorker)
-	dashboard.DELETE("/workers/:node_id", workerHandler.DeleteWorker)
-	dashboard.GET("/workers/:node_id/startup-command", workerHandler.GetWorkerStartupCommand)
 	dashboard.GET("/console/tokens", mcpAuth.ListTokens)
 	dashboard.POST("/console/tokens", mcpAuth.CreateToken)
 	dashboard.DELETE("/console/tokens/:token_id", mcpAuth.DeleteToken)
 	dashboard.GET("/console/tokens/:token_id/value", mcpAuth.GetTokenValue)
+	dashboard.POST("/console/register", consoleAuth.RequireAdmin(), consoleAuth.Register)
+
+	adminDashboard := api.Group("/")
+	adminDashboard.Use(consoleAuth.RequireAuth(), consoleAuth.RequireAdmin())
+	adminDashboard.GET("/workers", workerHandler.ListWorkers)
+	adminDashboard.GET("/workers/stats", workerHandler.WorkerStats)
+	adminDashboard.POST("/workers", workerHandler.CreateWorker)
+	adminDashboard.DELETE("/workers/:node_id", workerHandler.DeleteWorker)
+	adminDashboard.GET("/workers/:node_id/startup-command", workerHandler.GetWorkerStartupCommand)
 
 	registerEmbeddedWebRoutes(router)
 

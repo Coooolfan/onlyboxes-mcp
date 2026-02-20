@@ -1058,7 +1058,22 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 	defer grpcSrv.Stop()
 
 	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
-	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
+	mcpAuth := newBareTestMCPAuth()
+	tokenA := testMCPToken
+	tokenB := testMCPTokenB
+	if _, _, err := mcpAuth.createToken(context.Background(), testDashboardAccountID, "token-a", &tokenA); err != nil {
+		t.Fatalf("seed token-a failed: %v", err)
+	}
+	if _, _, err := mcpAuth.createToken(context.Background(), testDashboardAccountID, "token-b", &tokenB); err != nil {
+		t.Fatalf("seed token-b failed: %v", err)
+	}
+	const secondAccountID = "acc-test-member"
+	seedTestAccount(mcpAuth.queries, secondAccountID, "member-test", "member-pass", false)
+	tokenC := "mcp-token-test-c"
+	if _, _, err := mcpAuth.createToken(context.Background(), secondAccountID, "token-c", &tokenC); err != nil {
+		t.Fatalf("seed token-c failed: %v", err)
+	}
+	router := NewRouter(handler, newTestConsoleAuth(t), mcpAuth)
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
 
@@ -1319,8 +1334,8 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 	if strings.TrimSpace(taskB.TaskID) == "" {
 		t.Fatalf("expected task_id for token B")
 	}
-	if taskA.TaskID == taskB.TaskID {
-		t.Fatalf("expected token A/B request_id dedup isolation, got same task_id=%q", taskA.TaskID)
+	if taskA.TaskID != taskB.TaskID {
+		t.Fatalf("expected same-account request_id dedup share, got token A=%q token B=%q", taskA.TaskID, taskB.TaskID)
 	}
 
 	getCrossReq, err := http.NewRequest(http.MethodGet, httpSrv.URL+"/api/v1/tasks/"+taskA.TaskID, nil)
@@ -1333,8 +1348,8 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 		t.Fatalf("cross-token get task failed: %v", err)
 	}
 	defer getCrossRes.Body.Close()
-	if getCrossRes.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected cross-token get task 404, got %d", getCrossRes.StatusCode)
+	if getCrossRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected same-account cross-token get task 200, got %d", getCrossRes.StatusCode)
 	}
 
 	cancelCrossReq, err := http.NewRequest(http.MethodPost, httpSrv.URL+"/api/v1/tasks/"+taskA.TaskID+"/cancel", nil)
@@ -1347,8 +1362,8 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 		t.Fatalf("cross-token cancel task failed: %v", err)
 	}
 	defer cancelCrossRes.Body.Close()
-	if cancelCrossRes.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected cross-token cancel task 404, got %d", cancelCrossRes.StatusCode)
+	if cancelCrossRes.StatusCode != http.StatusOK && cancelCrossRes.StatusCode != http.StatusConflict {
+		t.Fatalf("expected same-account cross-token cancel task to be visible, got %d", cancelCrossRes.StatusCode)
 	}
 
 	writeRes, err := postJSONWithToken(httpSrv.URL+"/api/v1/commands/terminal", `{"command":"write"}`, testMCPToken)
@@ -1383,8 +1398,72 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 		t.Fatalf("terminal read token B failed: %v", err)
 	}
 	defer readByBRes.Body.Close()
-	if readByBRes.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected token B terminal read 404, got %d", readByBRes.StatusCode)
+	if readByBRes.StatusCode != http.StatusOK {
+		t.Fatalf("expected token B terminal read 200 for same account, got %d", readByBRes.StatusCode)
+	}
+	readByBPayload := terminalCommandResponse{}
+	if err := json.NewDecoder(readByBRes.Body).Decode(&readByBPayload); err != nil {
+		t.Fatalf("decode terminal read token B response failed: %v", err)
+	}
+	if readByBPayload.Stdout != "persisted" {
+		t.Fatalf("expected token B terminal read stdout persisted, got %q", readByBPayload.Stdout)
+	}
+
+	taskCRes, err := postJSONWithToken(httpSrv.URL+"/api/v1/tasks", taskBody, tokenC)
+	if err != nil {
+		t.Fatalf("submit task token C failed: %v", err)
+	}
+	defer taskCRes.Body.Close()
+	if taskCRes.StatusCode == http.StatusConflict {
+		t.Fatalf("expected cross-account token C submit not to conflict with token A")
+	}
+	taskC := taskResponse{}
+	if err := json.NewDecoder(taskCRes.Body).Decode(&taskC); err != nil {
+		t.Fatalf("decode token C task response failed: %v", err)
+	}
+	if strings.TrimSpace(taskC.TaskID) == "" {
+		t.Fatalf("expected task_id for token C")
+	}
+	if taskC.TaskID == taskA.TaskID {
+		t.Fatalf("expected cross-account request_id isolation, got same task_id=%q", taskC.TaskID)
+	}
+
+	getCrossAccountReq, err := http.NewRequest(http.MethodGet, httpSrv.URL+"/api/v1/tasks/"+taskA.TaskID, nil)
+	if err != nil {
+		t.Fatalf("build cross-account get task request failed: %v", err)
+	}
+	getCrossAccountReq.Header.Set(trustedTokenHeader, tokenC)
+	getCrossAccountRes, err := http.DefaultClient.Do(getCrossAccountReq)
+	if err != nil {
+		t.Fatalf("cross-account get task failed: %v", err)
+	}
+	defer getCrossAccountRes.Body.Close()
+	if getCrossAccountRes.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected cross-account get task 404, got %d", getCrossAccountRes.StatusCode)
+	}
+
+	cancelCrossAccountReq, err := http.NewRequest(http.MethodPost, httpSrv.URL+"/api/v1/tasks/"+taskA.TaskID+"/cancel", nil)
+	if err != nil {
+		t.Fatalf("build cross-account cancel task request failed: %v", err)
+	}
+	cancelCrossAccountReq.Header.Set(trustedTokenHeader, tokenC)
+	cancelCrossAccountRes, err := http.DefaultClient.Do(cancelCrossAccountReq)
+	if err != nil {
+		t.Fatalf("cross-account cancel task failed: %v", err)
+	}
+	defer cancelCrossAccountRes.Body.Close()
+	if cancelCrossAccountRes.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected cross-account cancel task 404, got %d", cancelCrossAccountRes.StatusCode)
+	}
+
+	readBodyByC := `{"command":"read","session_id":"` + writePayload.SessionID + `"}`
+	readByCRes, err := postJSONWithToken(httpSrv.URL+"/api/v1/commands/terminal", readBodyByC, tokenC)
+	if err != nil {
+		t.Fatalf("terminal read token C failed: %v", err)
+	}
+	defer readByCRes.Body.Close()
+	if readByCRes.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected token C terminal read 404, got %d", readByCRes.StatusCode)
 	}
 
 	mcpClientA := mcp.NewClient(&mcp.Implementation{
@@ -1439,11 +1518,39 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp readImage token B failed: %v", err)
 	}
-	if !readImageB.IsError {
-		t.Fatalf("expected mcp readImage token B tool error")
+	if readImageB.IsError {
+		t.Fatalf("expected mcp readImage token B success for same account, got %q", firstTextContent(readImageB))
 	}
-	if got := firstTextContent(readImageB); !strings.Contains(got, "session_not_found") {
-		t.Fatalf("expected session_not_found for token B, got %q", got)
+
+	mcpClientC := mcp.NewClient(&mcp.Implementation{
+		Name:    "mcp-token-c-client",
+		Version: "v0.1.0",
+	}, nil)
+	mcpSessionC, err := mcpClientC.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:             httpSrv.URL + "/mcp",
+		DisableStandaloneSSE: true,
+		HTTPClient:           newMCPTokenHTTPClient(tokenC),
+	}, nil)
+	if err != nil {
+		t.Fatalf("connect mcp token C failed: %v", err)
+	}
+	defer mcpSessionC.Close()
+
+	readImageC, err := mcpSessionC.CallTool(ctx, &mcp.CallToolParams{
+		Name: "readImage",
+		Arguments: map[string]any{
+			"session_id": writePayload.SessionID,
+			"file_path":  "/workspace/state.txt",
+		},
+	})
+	if err != nil {
+		t.Fatalf("mcp readImage token C failed: %v", err)
+	}
+	if !readImageC.IsError {
+		t.Fatalf("expected mcp readImage token C tool error")
+	}
+	if got := firstTextContent(readImageC); !strings.Contains(got, "session_not_found") {
+		t.Fatalf("expected session_not_found for token C, got %q", got)
 	}
 }
 

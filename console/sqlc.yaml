@@ -4,12 +4,13 @@ sql:
     schema:
       - "db/migrations/00001_init.sql"
       - "db/migrations/00002_dashboard_credentials.sql"
+      - "db/migrations/00003_accounts_and_token_binding.sql"
     queries:
+      - "db/queries/accounts.sql"
       - "db/queries/workers.sql"
       - "db/queries/tokens.sql"
       - "db/queries/tasks.sql"
       - "db/queries/maintenance.sql"
-      - "db/queries/dashboard_auth.sql"
     gen:
       go:
         package: "sqlc"
@@ -17,3 +18,4 @@ sql:
         emit_json_tags: true
         emit_interface: false
         emit_exact_table_names: false
+        omit_unused_structs: true

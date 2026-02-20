@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,7 @@ type Config struct {
 	DBBusyTimeoutMS      int
 	HashKey              string
 	TaskRetentionDays    int
+	EnableRegistration   bool
 }
 
 func Load() Config {
@@ -50,6 +52,7 @@ func Load() Config {
 		DBBusyTimeoutMS:      dbBusyTimeoutMS,
 		HashKey:              os.Getenv("CONSOLE_HASH_KEY"),
 		TaskRetentionDays:    taskRetentionDays,
+		EnableRegistration:   parseBoolEnv("CONSOLE_ENABLE_REGISTRATION", false),
 	}
 }
 
@@ -71,4 +74,16 @@ func parsePositiveIntEnv(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return parsed
+}
+
+func parseBoolEnv(key string, defaultValue bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
 }

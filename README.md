@@ -21,22 +21,31 @@ CONSOLE_HEARTBEAT_INTERVAL_SEC=5 \
 CONSOLE_HASH_KEY=replace-with-long-random-key \
 CONSOLE_DASHBOARD_USERNAME=admin \
 CONSOLE_DASHBOARD_PASSWORD=change-me \
+CONSOLE_ENABLE_REGISTRATION=false \
 go run ./cmd/console
 ```
 
 `console` 启动后，worker 数量默认为 `0`。worker 凭据（`worker_id/worker_secret`）由控制台 UI（或对应 API）按需新增生成，并以哈希形式持久化到 SQLite。
 
-`console` 会在终端打印控制台登录账号密码：
-- 若 `CONSOLE_DASHBOARD_USERNAME` / `CONSOLE_DASHBOARD_PASSWORD` 有设置，则直接使用设置值。
-- 若任一未设置，仅缺失项会随机生成。
+账号体系说明：
+- `console` 首次初始化会创建一个管理员账号。
+- 首次初始化时，账号来源仍是 `CONSOLE_DASHBOARD_USERNAME` / `CONSOLE_DASHBOARD_PASSWORD`；缺失项会随机生成并打印。
+- 一旦数据库中已存在账号，后续启动会忽略上述环境变量并打印忽略日志。
+- 管理员可在 `CONSOLE_ENABLE_REGISTRATION=true` 时创建非管理员账号；默认关闭。
 
 可信 token 由控制台 API/UI 管理并持久化到 SQLite（仅存哈希，不存明文）。  
 若当前未配置任何 token，`/mcp` 与执行类 API 会返回 `401`。
+
+权限与隔离说明：
+- `GET/POST/DELETE /api/v1/workers*` 仅管理员可调用（非管理员返回 `403`）。
+- `GET/POST/DELETE /api/v1/console/tokens*` 始终仅作用于当前登录账号自己的 token。
+- MCP/commands/tasks 鉴权仍使用 `X-Onlyboxes-Token`，但 owner 隔离单位为 `account_id`：同账号多个 token 共享 task/terminal session，跨账号隔离。
 
 数据库相关环境变量：
 - `CONSOLE_DB_PATH`（默认 `./onlyboxes-console.db`）
 - `CONSOLE_DB_BUSY_TIMEOUT_MS`（默认 `5000`）
 - `CONSOLE_TASK_RETENTION_DAYS`（默认 `30`）
+- `CONSOLE_ENABLE_REGISTRATION`（默认 `false`）
 
 2. 登录控制台（保存 Cookie）：
 
@@ -44,6 +53,12 @@ go run ./cmd/console
 curl -c /tmp/onlyboxes-console.cookie -X POST "http://127.0.0.1:8089/api/v1/console/login" \
   -H "Content-Type: application/json" \
   -d '{"username":"<dashboard_username>","password":"<dashboard_password>"}'
+```
+
+可选：查看当前会话与角色信息：
+
+```bash
+curl -b /tmp/onlyboxes-console.cookie "http://127.0.0.1:8089/api/v1/console/session"
 ```
 
 3. 查看当前可信 token（接口需登录）：
@@ -65,6 +80,8 @@ curl -b /tmp/onlyboxes-console.cookie -X POST "http://127.0.0.1:8089/api/v1/cons
 ```bash
 curl -b /tmp/onlyboxes-console.cookie -X POST "http://127.0.0.1:8089/api/v1/workers"
 ```
+
+说明：worker 管理接口仅管理员可调用。
 
 响应示例：
 

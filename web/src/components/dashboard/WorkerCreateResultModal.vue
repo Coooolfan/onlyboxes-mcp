@@ -61,7 +61,11 @@ function extractEnvValue(command: string, key: string): string {
     return ''
   }
 
-  let value = matched[1].trim()
+  const capturedValue = matched[1]
+  if (typeof capturedValue !== 'string') {
+    return ''
+  }
+  let value = capturedValue.trim()
   if (
     (value.startsWith('"') && value.endsWith('"')) ||
     (value.startsWith("'") && value.endsWith("'"))
@@ -145,7 +149,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="payload" class="worker-modal-backdrop" @click.self="closeModal">
-    <div class="worker-modal" role="dialog" aria-modal="true" aria-labelledby="worker-created-dialog-title">
+    <div
+      class="worker-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="worker-created-dialog-title"
+    >
       <div class="worker-modal-header">
         <h3 id="worker-created-dialog-title">Worker Created</h3>
         <button type="button" class="ghost-btn small" @click="closeModal">Done</button>
@@ -179,7 +188,12 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="worker-modal-actions">
-        <button type="button" class="ghost-btn small" :disabled="copyingCommand || !commandText" @click="copyStartupCommand">
+        <button
+          type="button"
+          class="ghost-btn small"
+          :disabled="copyingCommand || !commandText"
+          @click="copyStartupCommand"
+        >
           {{ copyButtonText }}
         </button>
         <button type="button" class="primary-btn small" @click="closeModal">Done</button>

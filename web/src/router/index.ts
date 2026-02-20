@@ -2,12 +2,18 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 
+const LandingRouteView = { render: () => null }
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
       path: '/',
-      redirect: '/workers',
+      name: 'home',
+      component: LandingRouteView,
+      meta: {
+        resolveLanding: true,
+      },
     },
     {
       path: '/login',
@@ -20,11 +26,24 @@ const router = createRouter({
       component: () => import('@/views/WorkersPage.vue'),
       meta: {
         requiresAuth: true,
+        requiresAdmin: true,
+      },
+    },
+    {
+      path: '/tokens',
+      name: 'tokens',
+      component: () => import('@/views/TokensPage.vue'),
+      meta: {
+        requiresAuth: true,
       },
     },
     {
       path: '/:pathMatch(.*)*',
-      redirect: '/workers',
+      name: 'not-found',
+      component: LandingRouteView,
+      meta: {
+        resolveLanding: true,
+      },
     },
   ],
 })
@@ -38,6 +57,10 @@ router.beforeEach(async (to) => {
     // fall through with unauthenticated state and let pages render their own errors
   }
 
+  if (to.meta.resolveLanding) {
+    return authStore.isAuthenticated ? authStore.homePath : '/login'
+  }
+
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     return {
       path: '/login',
@@ -47,11 +70,15 @@ router.beforeEach(async (to) => {
     }
   }
 
+  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    return '/tokens'
+  }
+
   if (to.path === '/login' && authStore.isAuthenticated) {
     const redirect =
       typeof to.query.redirect === 'string' && to.query.redirect.startsWith('/')
         ? to.query.redirect
-        : '/workers'
+        : authStore.homePath
     return redirect
   }
 

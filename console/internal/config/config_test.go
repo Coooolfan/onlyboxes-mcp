@@ -13,6 +13,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("CONSOLE_HEARTBEAT_INTERVAL_SEC", "")
 	t.Setenv("CONSOLE_DASHBOARD_USERNAME", "")
 	t.Setenv("CONSOLE_DASHBOARD_PASSWORD", "")
+	t.Setenv("CONSOLE_ENABLE_REGISTRATION", "")
 
 	cfg := Load()
 	if cfg.HTTPAddr != defaultHTTPAddr {
@@ -33,6 +34,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DashboardUsername != "" || cfg.DashboardPassword != "" {
 		t.Fatalf("expected empty dashboard credentials, got username=%q password=%q", cfg.DashboardUsername, cfg.DashboardPassword)
 	}
+	if cfg.EnableRegistration {
+		t.Fatalf("expected registration disabled by default")
+	}
 }
 
 func TestLoadReadsDashboardCredentialsAndDurations(t *testing.T) {
@@ -41,6 +45,7 @@ func TestLoadReadsDashboardCredentialsAndDurations(t *testing.T) {
 	t.Setenv("CONSOLE_OFFLINE_TTL_SEC", "30")
 	t.Setenv("CONSOLE_REPLAY_WINDOW_SEC", "120")
 	t.Setenv("CONSOLE_HEARTBEAT_INTERVAL_SEC", "10")
+	t.Setenv("CONSOLE_ENABLE_REGISTRATION", "true")
 
 	cfg := Load()
 	if cfg.DashboardUsername != "admin" {
@@ -58,6 +63,9 @@ func TestLoadReadsDashboardCredentialsAndDurations(t *testing.T) {
 	if cfg.HeartbeatIntervalSec != 10 {
 		t.Fatalf("expected HeartbeatIntervalSec=10, got %d", cfg.HeartbeatIntervalSec)
 	}
+	if !cfg.EnableRegistration {
+		t.Fatalf("expected registration enabled")
+	}
 }
 
 func TestLoadFallsBackForInvalidNumericEnv(t *testing.T) {
@@ -74,5 +82,13 @@ func TestLoadFallsBackForInvalidNumericEnv(t *testing.T) {
 	}
 	if cfg.HeartbeatIntervalSec != int32(defaultHeartbeatIntervalSec) {
 		t.Fatalf("expected default heartbeat interval, got %d", cfg.HeartbeatIntervalSec)
+	}
+}
+
+func TestLoadRegistrationFlagFallback(t *testing.T) {
+	t.Setenv("CONSOLE_ENABLE_REGISTRATION", "not-a-bool")
+	cfg := Load()
+	if cfg.EnableRegistration {
+		t.Fatalf("expected invalid bool value to fallback to false")
 	}
 }

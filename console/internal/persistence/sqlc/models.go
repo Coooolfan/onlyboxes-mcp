@@ -4,11 +4,13 @@
 
 package sqlc
 
-type DashboardCredential struct {
-	SingletonID     int64  `json:"singleton_id"`
+type Account struct {
+	AccountID       string `json:"account_id"`
 	Username        string `json:"username"`
+	UsernameKey     string `json:"username_key"`
 	PasswordHash    string `json:"password_hash"`
 	HashAlgo        string `json:"hash_algo"`
+	IsAdmin         int64  `json:"is_admin"`
 	CreatedAtUnixMs int64  `json:"created_at_unix_ms"`
 	UpdatedAtUnixMs int64  `json:"updated_at_unix_ms"`
 }
@@ -33,6 +35,7 @@ type Task struct {
 
 type TrustedToken struct {
 	TokenID         string `json:"token_id"`
+	AccountID       string `json:"account_id"`
 	Name            string `json:"name"`
 	NameKey         string `json:"name_key"`
 	TokenHash       string `json:"token_hash"`

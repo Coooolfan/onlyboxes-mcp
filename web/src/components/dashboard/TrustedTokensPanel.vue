@@ -154,7 +154,9 @@ onBeforeUnmount(() => {
     <p v-if="collapsed" class="collapsed-hint">列表已折叠。展开后查看所有 Token 简要信息。</p>
 
     <template v-else>
-      <p v-if="tokens.length === 0" class="empty-hint">未配置，MCP 与受保护 HTTP 端点当前全部拒绝。</p>
+      <p v-if="tokens.length === 0" class="empty-hint">
+        未配置，MCP 与受保护 HTTP 端点当前全部拒绝。
+      </p>
 
       <ul v-else class="token-list">
         <li v-for="item in tokens" :key="item.id" class="token-item">
@@ -190,9 +192,16 @@ onBeforeUnmount(() => {
   </section>
 
   <div v-if="showCreateModal" class="token-modal-backdrop" @click.self="closeCreateModal">
-    <div class="token-modal" role="dialog" aria-modal="true" aria-labelledby="trusted-token-dialog-title">
+    <div
+      class="token-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="trusted-token-dialog-title"
+    >
       <div class="token-modal-header">
-        <h3 id="trusted-token-dialog-title">{{ createdToken ? 'Token Created' : 'New Trusted Token' }}</h3>
+        <h3 id="trusted-token-dialog-title">
+          {{ createdToken ? 'Token Created' : 'New Trusted Token' }}
+        </h3>
         <button type="button" class="ghost-btn small" @click="closeCreateModal">
           {{ createdToken ? 'Done' : 'Cancel' }}
         </button>
@@ -209,8 +218,19 @@ onBeforeUnmount(() => {
           <p v-if="modalError" class="token-modal-error">{{ modalError }}</p>
 
           <div class="token-modal-actions">
-            <button type="button" class="ghost-btn small" :disabled="creatingToken" @click="closeCreateModal">Cancel</button>
-            <button type="submit" class="primary-btn small" :disabled="creatingToken || nameInput.trim() === ''">
+            <button
+              type="button"
+              class="ghost-btn small"
+              :disabled="creatingToken"
+              @click="closeCreateModal"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="primary-btn small"
+              :disabled="creatingToken || nameInput.trim() === ''"
+            >
               {{ creatingToken ? 'Creating...' : 'Create Token' }}
             </button>
           </div>
@@ -227,7 +247,12 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="token-modal-actions">
-          <button type="button" class="ghost-btn small" :disabled="copyingCreatedToken" @click="copyCreatedToken">
+          <button
+            type="button"
+            class="ghost-btn small"
+            :disabled="copyingCreatedToken"
+            @click="copyCreatedToken"
+          >
             {{ createdTokenCopyButtonText }}
           </button>
           <button type="button" class="primary-btn small" @click="closeCreateModal">Done</button>

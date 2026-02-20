@@ -1,7 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -10,7 +13,6 @@ import (
 	"time"
 
 	"github.com/onlyboxes/onlyboxes/console/internal/persistence"
-	"github.com/onlyboxes/onlyboxes/console/internal/persistence/sqlc"
 	"github.com/onlyboxes/onlyboxes/console/internal/testutil/registrytest"
 )
 
@@ -80,133 +82,135 @@ func TestResolveDashboardCredentials(t *testing.T) {
 	}
 }
 
-func TestInitializeDashboardCredentialsPersistsOnFirstRun(t *testing.T) {
+func TestInitializeAdminAccountPersistsOnFirstRun(t *testing.T) {
 	ctx := context.Background()
-	db := openTestDashboardDB(t)
+	db := openTestAuthDB(t)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	result, err := InitializeDashboardCredentials(ctx, db.Queries, "", "")
+	result, err := InitializeAdminAccount(ctx, db.Queries, "", "")
 	if err != nil {
-		t.Fatalf("initialize dashboard credentials: %v", err)
+		t.Fatalf("initialize admin account: %v", err)
 	}
 	if !result.InitializedNow {
 		t.Fatalf("expected initialized now")
 	}
 	if result.EnvIgnored {
-		t.Fatalf("expected env_ignored=false")
+		t.Fatalf("expected env ignored=false")
 	}
 	if !strings.HasPrefix(result.Username, dashboardUsernamePrefix) {
 		t.Fatalf("expected generated username prefix %q, got %q", dashboardUsernamePrefix, result.Username)
 	}
 	if strings.TrimSpace(result.PasswordPlaintext) == "" {
-		t.Fatalf("expected plaintext password in first initialization result")
+		t.Fatalf("expected plaintext password in first init result")
 	}
-	if strings.TrimSpace(result.PasswordHash) == "" {
-		t.Fatalf("expected non-empty password hash")
-	}
-	if result.PasswordHash == result.PasswordPlaintext {
-		t.Fatalf("expected hash storage, got plaintext")
-	}
-	if !strings.EqualFold(result.HashAlgo, dashboardPasswordHashAlgo) {
-		t.Fatalf("unexpected hash algo: %q", result.HashAlgo)
+	if strings.TrimSpace(result.AccountID) == "" {
+		t.Fatalf("expected account_id in init result")
 	}
 
-	stored, err := db.Queries.GetDashboardCredential(ctx)
+	stored, err := db.Queries.GetAccountByID(ctx, result.AccountID)
 	if err != nil {
-		t.Fatalf("get persisted dashboard credential: %v", err)
-	}
-	if stored.SingletonID != dashboardCredentialSingletonID {
-		t.Fatalf("unexpected singleton id: %d", stored.SingletonID)
+		t.Fatalf("load persisted account: %v", err)
 	}
 	if stored.Username != result.Username {
-		t.Fatalf("unexpected persisted username: %q", stored.Username)
+		t.Fatalf("unexpected username: %q", stored.Username)
 	}
-	if stored.PasswordHash != result.PasswordHash {
-		t.Fatalf("unexpected persisted hash")
+	if stored.IsAdmin != 1 {
+		t.Fatalf("expected is_admin=1, got %d", stored.IsAdmin)
+	}
+	if !strings.EqualFold(stored.HashAlgo, dashboardPasswordHashAlgo) {
+		t.Fatalf("unexpected hash algo: %q", stored.HashAlgo)
+	}
+	if !compareDashboardPassword(stored.PasswordHash, result.PasswordPlaintext) {
+		t.Fatalf("expected stored hash to match initialized password")
 	}
 }
 
-func TestInitializeDashboardCredentialsLoadsPersistedAndIgnoresEnv(t *testing.T) {
+func TestInitializeAdminAccountLoadsPersistedAndIgnoresEnv(t *testing.T) {
 	ctx := context.Background()
-	db := openTestDashboardDB(t)
+	db := openTestAuthDB(t)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	first, err := InitializeDashboardCredentials(ctx, db.Queries, "admin-first", "password-first")
+	first, err := InitializeAdminAccount(ctx, db.Queries, "admin-first", "password-first")
 	if err != nil {
-		t.Fatalf("initialize first dashboard credential: %v", err)
+		t.Fatalf("first initialize admin account: %v", err)
 	}
 	if !first.InitializedNow {
 		t.Fatalf("expected first initialization")
 	}
 
-	second, err := InitializeDashboardCredentials(ctx, db.Queries, "admin-second", "password-second")
+	second, err := InitializeAdminAccount(ctx, db.Queries, "admin-second", "password-second")
 	if err != nil {
-		t.Fatalf("initialize second dashboard credential: %v", err)
+		t.Fatalf("second initialize admin account: %v", err)
 	}
 	if second.InitializedNow {
-		t.Fatalf("expected loading existing credential, got initialized=true")
+		t.Fatalf("expected loading persisted admin account")
 	}
 	if !second.EnvIgnored {
-		t.Fatalf("expected env ignored when persisted credential exists")
+		t.Fatalf("expected env ignored=true when admin account exists")
+	}
+	if second.AccountID != first.AccountID {
+		t.Fatalf("expected persisted account_id %q, got %q", first.AccountID, second.AccountID)
 	}
 	if second.Username != first.Username {
 		t.Fatalf("expected persisted username %q, got %q", first.Username, second.Username)
 	}
-	if second.PasswordHash != first.PasswordHash {
-		t.Fatalf("expected persisted password hash")
-	}
 	if second.PasswordPlaintext != "" {
-		t.Fatalf("expected empty plaintext password for loaded credential")
-	}
-
-	auth := NewConsoleAuth(DashboardCredentialMaterial{
-		Username:     second.Username,
-		PasswordHash: second.PasswordHash,
-		HashAlgo:     second.HashAlgo,
-	})
-	if !auth.checkCredentials("admin-first", "password-first") {
-		t.Fatalf("expected persisted credential to remain valid")
-	}
-	if auth.checkCredentials("admin-second", "password-second") {
-		t.Fatalf("expected env credential not to override persisted credential")
+		t.Fatalf("expected empty plaintext password for loaded account")
 	}
 }
 
-func TestInitializeDashboardCredentialsRejectsUnsupportedHashAlgo(t *testing.T) {
+func TestInitializeAdminAccountRetriesOnAccountIDConflict(t *testing.T) {
 	ctx := context.Background()
-	db := openTestDashboardDB(t)
+	db := openTestAuthDB(t)
 	defer func() {
 		_ = db.Close()
 	}()
 
-	if err := db.Queries.InsertDashboardCredential(ctx, sqlc.InsertDashboardCredentialParams{
-		SingletonID:     dashboardCredentialSingletonID,
-		Username:        "admin",
-		PasswordHash:    db.Hasher.Hash("secret"),
-		HashAlgo:        "legacy-plain",
-		CreatedAtUnixMs: time.Now().UnixMilli(),
-		UpdatedAtUnixMs: time.Now().UnixMilli(),
-	}); err != nil {
-		t.Fatalf("seed dashboard credential: %v", err)
-	}
+	seedTestAccount(db.Queries, "acc-conflict", "seed-user", "seed-pass", false)
 
-	_, err := InitializeDashboardCredentials(ctx, db.Queries, "", "")
-	if err == nil {
-		t.Fatalf("expected error for unsupported hash algo")
+	previousGenerator := accountIDGenerator
+	sequence := []string{"acc-conflict", "acc-retry-success"}
+	generateIdx := 0
+	accountIDGenerator = func() (string, error) {
+		if generateIdx >= len(sequence) {
+			return "", errors.New("account id sequence exhausted")
+		}
+		value := sequence[generateIdx]
+		generateIdx++
+		return value, nil
+	}
+	t.Cleanup(func() {
+		accountIDGenerator = previousGenerator
+	})
+
+	result, err := InitializeAdminAccount(ctx, db.Queries, "admin-retry", "password-retry")
+	if err != nil {
+		t.Fatalf("initialize admin account with account_id conflict retry: %v", err)
+	}
+	if !result.InitializedNow {
+		t.Fatalf("expected initialized now")
+	}
+	if result.AccountID != "acc-retry-success" {
+		t.Fatalf("expected retried account_id acc-retry-success, got %q", result.AccountID)
 	}
 }
 
-func TestCheckCredentialsRejectsWrongUsername(t *testing.T) {
-	auth := newTestConsoleAuth(t)
-	if auth.checkCredentials("wrong-user", testDashboardPassword) {
-		t.Fatalf("expected invalid credentials for username mismatch")
-	}
-	if auth.checkCredentials(testDashboardUsername, "wrong-password") {
-		t.Fatalf("expected invalid credentials for password mismatch")
+func TestInitializeAdminAccountReturnsConflictOnUsernameKeyCollision(t *testing.T) {
+	ctx := context.Background()
+	db := openTestAuthDB(t)
+	defer func() {
+		_ = db.Close()
+	}()
+
+	seedTestAccount(db.Queries, "acc-existing", "admin-dup", "seed-pass", false)
+
+	_, err := InitializeAdminAccount(ctx, db.Queries, "ADMIN-dup", "password-new")
+	if !errors.Is(err, errAccountRegistrationConflict) {
+		t.Fatalf("expected errAccountRegistrationConflict, got %v", err)
 	}
 }
 
@@ -230,7 +234,7 @@ func TestConsoleAuthLoginLogoutLifecycle(t *testing.T) {
 	listRec := httptest.NewRecorder()
 	router.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for authenticated list request, got %d body=%s", listRec.Code, listRec.Body.String())
+		t.Fatalf("expected 200 for authenticated admin list request, got %d body=%s", listRec.Code, listRec.Body.String())
 	}
 
 	logoutReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/logout", nil)
@@ -247,6 +251,35 @@ func TestConsoleAuthLoginLogoutLifecycle(t *testing.T) {
 	router.ServeHTTP(listAfterLogoutRec, listAfterLogoutReq)
 	if listAfterLogoutRec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 after logout, got %d body=%s", listAfterLogoutRec.Code, listAfterLogoutRec.Body.String())
+	}
+}
+
+func TestConsoleAuthSessionEndpoint(t *testing.T) {
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	auth := newTestConsoleAuthWithRegistration(t, true)
+	router := NewRouter(handler, auth, newTestMCPAuth())
+	cookie := loginSessionCookie(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/console/session", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	payload := accountSessionResponse{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode session payload: %v", err)
+	}
+	if !payload.Authenticated {
+		t.Fatalf("expected authenticated=true")
+	}
+	if payload.Account.AccountID == "" || payload.Account.Username != testDashboardUsername || !payload.Account.IsAdmin {
+		t.Fatalf("unexpected session account payload: %#v", payload.Account)
+	}
+	if !payload.RegistrationEnabled {
+		t.Fatalf("expected registration_enabled=true")
 	}
 }
 
@@ -272,7 +305,109 @@ func TestConsoleAuthSessionExpires(t *testing.T) {
 	}
 }
 
-func openTestDashboardDB(t *testing.T) *persistence.DB {
+func TestConsoleAuthRegisterAndAdminGuard(t *testing.T) {
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	auth := newTestConsoleAuthWithRegistration(t, true)
+	router := NewRouter(handler, auth, newTestMCPAuth())
+	adminCookie := loginSessionCookie(t, router)
+
+	registerBody := []byte(`{"username":"member-a","password":"member-a-pass"}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/register", bytes.NewReader(registerBody))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerReq.AddCookie(adminCookie)
+	registerRec := httptest.NewRecorder()
+	router.ServeHTTP(registerRec, registerReq)
+	if registerRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", registerRec.Code, registerRec.Body.String())
+	}
+
+	nonAdminCookie := loginSessionCookieFor(t, router, "member-a", "member-a-pass")
+
+	workersReq := httptest.NewRequest(http.MethodGet, "/api/v1/workers", nil)
+	workersReq.AddCookie(nonAdminCookie)
+	workersRec := httptest.NewRecorder()
+	router.ServeHTTP(workersRec, workersReq)
+	if workersRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin workers access, got %d body=%s", workersRec.Code, workersRec.Body.String())
+	}
+
+	nonAdminRegisterReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/register", bytes.NewReader(registerBody))
+	nonAdminRegisterReq.Header.Set("Content-Type", "application/json")
+	nonAdminRegisterReq.AddCookie(nonAdminCookie)
+	nonAdminRegisterRec := httptest.NewRecorder()
+	router.ServeHTTP(nonAdminRegisterRec, nonAdminRegisterReq)
+	if nonAdminRegisterRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin register, got %d body=%s", nonAdminRegisterRec.Code, nonAdminRegisterRec.Body.String())
+	}
+}
+
+func TestConsoleAuthRegisterDuplicateUsernameConflict(t *testing.T) {
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	auth := newTestConsoleAuthWithRegistration(t, true)
+	router := NewRouter(handler, auth, newTestMCPAuth())
+	adminCookie := loginSessionCookie(t, router)
+
+	registerReqA := httptest.NewRequest(http.MethodPost, "/api/v1/console/register", strings.NewReader(`{"username":"member-dup","password":"member-pass"}`))
+	registerReqA.Header.Set("Content-Type", "application/json")
+	registerReqA.AddCookie(adminCookie)
+	registerRecA := httptest.NewRecorder()
+	router.ServeHTTP(registerRecA, registerReqA)
+	if registerRecA.Code != http.StatusCreated {
+		t.Fatalf("expected first register 201, got %d body=%s", registerRecA.Code, registerRecA.Body.String())
+	}
+
+	registerReqB := httptest.NewRequest(http.MethodPost, "/api/v1/console/register", strings.NewReader(`{"username":"MEMBER-dup","password":"member-pass-2"}`))
+	registerReqB.Header.Set("Content-Type", "application/json")
+	registerReqB.AddCookie(adminCookie)
+	registerRecB := httptest.NewRecorder()
+	router.ServeHTTP(registerRecB, registerReqB)
+	if registerRecB.Code != http.StatusConflict {
+		t.Fatalf("expected duplicate register 409, got %d body=%s", registerRecB.Code, registerRecB.Body.String())
+	}
+	if !strings.Contains(registerRecB.Body.String(), errAccountRegistrationConflict.Error()) {
+		t.Fatalf("expected duplicate register error message %q, got %s", errAccountRegistrationConflict.Error(), registerRecB.Body.String())
+	}
+}
+
+func TestConsoleAuthRegisterDisabled(t *testing.T) {
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	auth := newTestConsoleAuthWithRegistration(t, false)
+	router := NewRouter(handler, auth, newTestMCPAuth())
+	adminCookie := loginSessionCookie(t, router)
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/register", strings.NewReader(`{"username":"member-x","password":"pass"}`))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerReq.AddCookie(adminCookie)
+	registerRec := httptest.NewRecorder()
+	router.ServeHTTP(registerRec, registerReq)
+	if registerRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when registration is disabled, got %d body=%s", registerRec.Code, registerRec.Body.String())
+	}
+}
+
+func loginSessionCookieFor(t *testing.T, router http.Handler, username string, password string) *http.Cookie {
+	t.Helper()
+	body, err := json.Marshal(loginRequest{Username: username, Password: password})
+	if err != nil {
+		t.Fatalf("marshal login payload: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/console/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected login success for %q, got %d body=%s", username, rec.Code, rec.Body.String())
+	}
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == dashboardSessionCookieName {
+			return cookie
+		}
+	}
+	t.Fatalf("expected %s cookie in login response", dashboardSessionCookieName)
+	return nil
+}
+
+func openTestAuthDB(t *testing.T) *persistence.DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "dashboard-auth.db")
 	db, err := persistence.Open(context.Background(), persistence.Options{

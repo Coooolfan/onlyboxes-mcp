@@ -18,9 +18,23 @@ const emit = defineEmits<{
   <footer class="panel-footer">
     <span class="footer-meta">Showing {{ footerText }}</span>
     <div class="pager">
-      <button type="button" class="ghost-btn small" :disabled="!canPrev || loading" @click="emit('prev')">Prev</button>
+      <button
+        type="button"
+        class="ghost-btn small"
+        :disabled="!canPrev || loading"
+        @click="emit('prev')"
+      >
+        Prev
+      </button>
       <span class="page-indicator">Page {{ page }} / {{ totalPages }}</span>
-      <button type="button" class="ghost-btn small" :disabled="!canNext || loading" @click="emit('next')">Next</button>
+      <button
+        type="button"
+        class="ghost-btn small"
+        :disabled="!canNext || loading"
+        @click="emit('next')"
+      >
+        Next
+      </button>
     </div>
   </footer>
 </template>

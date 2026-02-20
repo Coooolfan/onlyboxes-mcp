@@ -1,13 +1,21 @@
 import { defineStore } from 'pinia'
 
-import { isInvalidCredentialsError, loginAPI, logoutAPI, probeSessionAPI } from '@/services/auth.api'
+import {
+  isInvalidCredentialsError,
+  loginAPI,
+  logoutAPI,
+  probeSessionAPI,
+} from '@/services/auth.api'
 import { isUnauthorizedError } from '@/services/http'
-import type { AuthState } from '@/types/auth'
+import type { AccountProfile, AuthState, ConsoleSessionPayload } from '@/types/auth'
 
 interface AuthStoreState {
   authState: AuthState
   bootstrapped: boolean
   bootstrapPromise: Promise<void> | null
+  currentAccount: AccountProfile | null
+  isAdmin: boolean
+  registrationEnabled: boolean
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -15,11 +23,31 @@ export const useAuthStore = defineStore('auth', {
     authState: 'loading',
     bootstrapped: false,
     bootstrapPromise: null,
+    currentAccount: null,
+    isAdmin: false,
+    registrationEnabled: false,
   }),
   getters: {
     isAuthenticated: (state) => state.authState === 'authenticated',
+    homePath: (state) => (state.isAdmin ? '/workers' : '/tokens'),
   },
   actions: {
+    applySession(payload: ConsoleSessionPayload): void {
+      this.authState = 'authenticated'
+      this.currentAccount = payload.account
+      this.isAdmin = payload.account.is_admin
+      this.registrationEnabled = payload.registration_enabled
+      this.bootstrapped = true
+    },
+
+    clearSession(): void {
+      this.currentAccount = null
+      this.isAdmin = false
+      this.registrationEnabled = false
+      this.authState = 'unauthenticated'
+      this.bootstrapped = true
+    },
+
     async bootstrap(): Promise<void> {
       if (this.bootstrapped) {
         return
@@ -31,15 +59,14 @@ export const useAuthStore = defineStore('auth', {
 
       const task = (async () => {
         try {
-          await probeSessionAPI()
-          this.authState = 'authenticated'
+          const sessionPayload = await probeSessionAPI()
+          this.applySession(sessionPayload)
         } catch (error) {
-          this.authState = 'unauthenticated'
+          this.clearSession()
           if (!isUnauthorizedError(error)) {
             throw error
           }
         } finally {
-          this.bootstrapped = true
           this.bootstrapPromise = null
         }
       })()
@@ -50,21 +77,18 @@ export const useAuthStore = defineStore('auth', {
 
     async login(username: string, password: string): Promise<void> {
       try {
-        await loginAPI(username, password)
+        const sessionPayload = await loginAPI(username, password)
+        this.applySession(sessionPayload)
       } catch (error) {
         if (isInvalidCredentialsError(error)) {
           throw error
         }
         throw error instanceof Error ? error : new Error('Failed to sign in.')
       }
-
-      this.authState = 'authenticated'
-      this.bootstrapped = true
     },
 
     logoutLocal(): void {
-      this.authState = 'unauthenticated'
-      this.bootstrapped = true
+      this.clearSession()
     },
 
     async logout(): Promise<void> {

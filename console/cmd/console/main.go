@@ -38,28 +38,28 @@ func main() {
 		}
 	}()
 
-	dashboardCredentials, err := httpapi.InitializeDashboardCredentials(
+	adminAccount, err := httpapi.InitializeAdminAccount(
 		context.Background(),
 		db.Queries,
 		cfg.DashboardUsername,
 		cfg.DashboardPassword,
 	)
 	if err != nil {
-		log.Fatalf("failed to initialize dashboard credentials: %v", err)
+		log.Fatalf("failed to initialize admin account: %v", err)
 	}
-	if dashboardCredentials.EnvIgnored {
+	if adminAccount.EnvIgnored {
 		log.Printf("env credentials ignored because persisted dashboard credential exists")
 	}
-	if dashboardCredentials.InitializedNow {
+	if adminAccount.InitializedNow {
 		log.Printf(
-			"console dashboard credentials initialized username=%s password=%s",
-			dashboardCredentials.Username,
-			dashboardCredentials.PasswordPlaintext,
+			"console admin account initialized username=%s password=%s",
+			adminAccount.Username,
+			adminAccount.PasswordPlaintext,
 		)
 	} else {
 		log.Printf(
-			"console dashboard credentials loaded username=%s password not reprinted",
-			dashboardCredentials.Username,
+			"console admin account loaded username=%s password not reprinted",
+			adminAccount.Username,
 		)
 	}
 
@@ -83,11 +83,7 @@ func main() {
 		registryService,
 		cfg.GRPCAddr,
 	)
-	consoleAuth := httpapi.NewConsoleAuth(httpapi.DashboardCredentialMaterial{
-		Username:     dashboardCredentials.Username,
-		PasswordHash: dashboardCredentials.PasswordHash,
-		HashAlgo:     dashboardCredentials.HashAlgo,
-	})
+	consoleAuth := httpapi.NewConsoleAuth(db.Queries, cfg.EnableRegistration)
 	mcpAuth := httpapi.NewMCPAuthWithPersistence(db)
 	httpSrv := &http.Server{
 		Addr:    cfg.HTTPAddr,

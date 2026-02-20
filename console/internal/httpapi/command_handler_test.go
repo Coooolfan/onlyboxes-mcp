@@ -203,7 +203,7 @@ func TestTerminalCommandSuccess(t *testing.T) {
 			if req.Capability != terminalExecCapability {
 				t.Fatalf("expected capability=%q, got %q", terminalExecCapability, req.Capability)
 			}
-			if req.OwnerID != ownerIDFromToken(testMCPToken) {
+			if req.OwnerID != testDashboardAccountID {
 				t.Fatalf("expected owner_id from token, got %q", req.OwnerID)
 			}
 			payload := terminalExecPayload{}

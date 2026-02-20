@@ -19,7 +19,7 @@ function resolveRedirect(): string {
   if (typeof redirect === 'string' && redirect.startsWith('/')) {
     return redirect
   }
-  return '/workers'
+  return authStore.homePath
 }
 
 async function submitLogin(): Promise<void> {
@@ -53,7 +53,9 @@ async function submitLogin(): Promise<void> {
   <section class="auth-panel">
     <p class="eyebrow">Onlyboxes / Console Login</p>
     <h1>Sign In to Control Panel</h1>
-    <p class="subtitle">Use the dashboard username and password printed in the console startup logs.</p>
+    <p class="subtitle">
+      Use the dashboard username and password printed in the console startup logs.
+    </p>
 
     <form class="login-form" @submit.prevent="submitLogin">
       <label class="field-label" for="dashboard-username">Username</label>
@@ -124,31 +126,6 @@ h1 {
   margin-top: 18px;
   display: grid;
   gap: 12px;
-}
-
-.field-label {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-.field-input {
-  width: 100%;
-  border: 1px solid var(--stroke);
-  border-radius: 12px;
-  background: #fff;
-  color: var(--text-primary);
-  padding: 10px 12px;
-  font: inherit;
-  outline: none;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
-}
-
-.field-input:focus {
-  border-color: #5b7cff;
-  box-shadow: 0 0 0 3px rgba(91, 124, 255, 0.18);
 }
 
 .auth-error {

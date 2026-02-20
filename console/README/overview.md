@@ -7,7 +7,7 @@ The console service hosts:
   - `GET /assets/*` serves bundled static assets.
   - non-API `GET/HEAD` routes use SPA fallback (`index.html`).
   - `/api/*` and `/mcp` are excluded from SPA fallback.
-- REST APIs for worker data (dashboard, authentication required):
+- REST APIs for worker data (dashboard authentication + admin required):
   - `GET /api/v1/workers` for paginated worker listing.
   - `GET /api/v1/workers/stats` for aggregated worker status metrics.
   - `POST /api/v1/workers` for creating a provisioned worker (`worker_id` + `worker_secret`) and returning its startup command.
@@ -20,9 +20,9 @@ The console service hosts:
   - `GET /api/v1/tasks/:task_id` for task status and result lookup.
   - `POST /api/v1/tasks/:task_id/cancel` for best-effort task cancellation.
   - request header: `X-Onlyboxes-Token: <token>` (must be in whitelist).
-  - token isolation: each token is treated as an isolated user boundary for task/session resources.
-  - task visibility: task lookup/cancel is owner-scoped by token; cross-token access returns `404`.
-  - task idempotency: `request_id` de-duplication is scoped per token (same `request_id` across different tokens does not conflict).
+  - owner isolation is account-scoped: token resolves to `account_id`, and task/session ownership uses `account_id`.
+  - task visibility: task lookup/cancel is owner-scoped by account; same-account tokens can access shared tasks, cross-account access returns `404`.
+  - task idempotency: `request_id` de-duplication is scoped per account.
 - MCP Streamable HTTP API (token whitelist required):
   - `POST /mcp` for JSON-RPC requests over Streamable HTTP transport.
   - request header: `X-Onlyboxes-Token: <token>` (must be in whitelist).
@@ -47,7 +47,7 @@ The console service hosts:
       - `command` is required (whitespace-only is rejected).
       - `session_id` is optional; omit to create a new terminal session/container.
       - `create_if_missing` controls behavior when `session_id` does not exist.
-      - session isolation: returned `session_id` can only be reused by the same token; cross-token use returns `session_not_found`.
+      - session isolation is account-scoped: same-account tokens can reuse `session_id`; cross-account use returns `session_not_found`.
       - `lease_ttl_sec` is optional and validated by worker-side lease bounds.
       - `timeout_ms` is optional, range `1..600000`, default `60000`.
       - output: `{"session_id":"...","created":true,"stdout":"...","stderr":"...","exit_code":0,"stdout_truncated":false,"stderr_truncated":false,"lease_expires_unix_ms":...}`
@@ -62,12 +62,15 @@ The console service hosts:
       - non-format failures (session/file missing, busy, timeout, read failure) are returned as tool errors.
 - dashboard authentication APIs:
   - `POST /api/v1/console/login` with `{"username":"...","password":"..."}`.
+  - login response includes `authenticated`, `account`, `registration_enabled`.
   - `POST /api/v1/console/logout`.
+  - `GET /api/v1/console/session` returns current session account payload.
+  - `POST /api/v1/console/register` creates non-admin account (admin-only, and only when `CONSOLE_ENABLE_REGISTRATION=true`).
   - token management (requires dashboard auth):
-    - `GET /api/v1/console/tokens` list token metadata (`id`, `name`, masked token).
-    - `POST /api/v1/console/tokens` create token (manual token or auto-generated, plaintext returned only in create response).
+    - `GET /api/v1/console/tokens` list current account token metadata (`id`, `name`, masked token).
+    - `POST /api/v1/console/tokens` create token bound to current account (manual token or auto-generated, plaintext returned only in create response).
     - `GET /api/v1/console/tokens/:token_id/value` returns `410 Gone` (token plaintext is no longer retrievable after creation).
-    - `DELETE /api/v1/console/tokens/:token_id` delete token.
+    - `DELETE /api/v1/console/tokens/:token_id` delete token (current account only, cross-account returns `404`).
 
 Security warning (high risk):
 - worker-to-console gRPC is currently plaintext by default (no TLS/mTLS).
@@ -89,30 +92,28 @@ Defaults:
 - SQLite DB path: `./onlyboxes-console.db`
 - SQLite busy timeout: `5000ms`
 - Task retention: `30 days`
+- Registration enabled: `false` (`CONSOLE_ENABLE_REGISTRATION`)
 
-Dashboard credential behavior:
-- dashboard username/password are persisted in SQLite table `dashboard_credentials`.
-- dashboard password is hashed with `bcrypt` before persistence (no plaintext storage).
-- username env: `CONSOLE_DASHBOARD_USERNAME`
-- password env: `CONSOLE_DASHBOARD_PASSWORD`
-- if persisted dashboard credential exists, env username/password are ignored.
-- if no persisted dashboard credential exists, startup resolves credentials from env; missing values are randomly generated.
-- password plaintext is logged only when dashboard credential is initialized for the first time.
-- on subsequent restarts, startup logs username only and does not reprint password.
+Dashboard account behavior:
+- dashboard accounts are persisted in SQLite table `accounts`.
+- account password is hashed with `bcrypt` before persistence (no plaintext storage).
+- initial admin username env: `CONSOLE_DASHBOARD_USERNAME`
+- initial admin password env: `CONSOLE_DASHBOARD_PASSWORD`
+- if no account exists at startup, console initializes one admin account from env (missing values are randomly generated).
+- if account already exists, the above env credentials are ignored.
+- initial admin plaintext password is logged only when initialized for the first time.
 - dashboard session is in-memory only; restarting `console` invalidates all dashboard login sessions.
-- recovery path for lost dashboard password:
-  - stop console
-  - run SQL: `DELETE FROM dashboard_credentials WHERE singleton_id = 1;`
-  - restart console to reinitialize credential and print password once
+- admin can create non-admin accounts via `POST /api/v1/console/register` when `CONSOLE_ENABLE_REGISTRATION=true`.
 
 Trusted token behavior:
 - tokens are persisted in SQLite and managed by dashboard APIs.
 - token value is stored as HMAC-SHA256 hash only; plaintext is returned once at creation time.
-- token metadata includes `name` (case-insensitive unique) and masked token (`token_masked`).
+- tokens are bound to `account_id`.
+- token metadata includes `name` (case-insensitive unique within the same account) and masked token (`token_masked`).
 - if token list is empty, MCP and execution APIs are effectively disabled (`401`).
-- every accepted token is treated as a distinct user for task and terminal-session ownership.
-- task and session resources are isolated across tokens (`task not found` / `session_not_found` on cross-token access).
-- `request_id` idempotency keys are isolated per token.
+- task and terminal-session ownership is account-scoped.
+- same-account tokens share task/session resources; cross-account access returns `task not found` / `session_not_found`.
+- `request_id` idempotency keys are account-scoped.
 
 Task persistence behavior:
 - task input/result/status lifecycle is persisted in SQLite.

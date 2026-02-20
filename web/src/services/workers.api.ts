@@ -98,7 +98,9 @@ export async function deleteWorkerAPI(nodeID: string): Promise<void> {
   }
 }
 
-export async function fetchTrustedTokensAPI(signal: AbortSignal): Promise<TrustedTokenListResponse> {
+export async function fetchTrustedTokensAPI(
+  signal: AbortSignal,
+): Promise<TrustedTokenListResponse> {
   const response = await request('/api/v1/console/tokens', { signal })
   if (!response.ok) {
     throw new Error(await parseAPIError(response))
@@ -111,7 +113,9 @@ export async function fetchTrustedTokensAPI(signal: AbortSignal): Promise<Truste
   }
 }
 
-export async function createTrustedTokenAPI(input: TrustedTokenCreateInput): Promise<TrustedTokenCreateResponse> {
+export async function createTrustedTokenAPI(
+  input: TrustedTokenCreateInput,
+): Promise<TrustedTokenCreateResponse> {
   const response = await request('/api/v1/console/tokens', {
     method: 'POST',
     headers: {

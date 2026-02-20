@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/onlyboxes/onlyboxes/console/internal/persistence"
 	"github.com/onlyboxes/onlyboxes/console/internal/persistence/sqlc"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 const trustedTokenHeader = "X-Onlyboxes-Token"
@@ -76,6 +79,7 @@ type trustedTokenValueResponse struct {
 
 type trustedTokenRecord struct {
 	ID          string
+	AccountID   string
 	Name        string
 	NameKey     string
 	Token       string
@@ -103,21 +107,24 @@ func NewMCPAuthWithPersistence(db *persistence.DB) *MCPAuth {
 		hasher:  db.Hasher,
 		nowFn:   time.Now,
 	}
-	if auth.hasher != nil {
-		setOwnerIDHashFunc(auth.hasher.Hash)
-	}
 	return auth
 }
 
 func (a *MCPAuth) RequireToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := strings.TrimSpace(c.GetHeader(trustedTokenHeader))
-		if token == "" || a == nil || a.hasher == nil || !a.isAllowed(token) {
+		if token == "" || a == nil || a.hasher == nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or missing token"})
 			c.Abort()
 			return
 		}
-		setRequestOwnerID(c, a.hasher.Hash(token))
+		record, ok := a.lookupTrustedToken(c.Request.Context(), token)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or missing token"})
+			c.Abort()
+			return
+		}
+		setRequestOwnerID(c, strings.TrimSpace(record.AccountID))
 		c.Next()
 	}
 }
@@ -127,8 +134,12 @@ func (a *MCPAuth) ListTokens(c *gin.Context) {
 		c.JSON(http.StatusOK, trustedTokenListResponse{Items: []trustedTokenItem{}, Total: 0})
 		return
 	}
+	account, ok := requireSessionAccount(c)
+	if !ok {
+		return
+	}
 
-	records, err := a.queries.ListTrustedTokens(c.Request.Context())
+	records, err := a.queries.ListTrustedTokensByAccount(c.Request.Context(), account.AccountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list tokens"})
 		return
@@ -155,14 +166,17 @@ func (a *MCPAuth) isAllowed(token string) bool {
 	if a == nil || a.queries == nil || a.hasher == nil {
 		return false
 	}
-	tokenHash := a.hasher.Hash(token)
-	_, err := a.queries.GetTrustedTokenByHash(contextBackground(), tokenHash)
-	return err == nil
+	_, ok := a.lookupTrustedToken(context.Background(), token)
+	return ok
 }
 
 func (a *MCPAuth) CreateToken(c *gin.Context) {
 	if a == nil || a.queries == nil || a.hasher == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "token store is unavailable"})
+		return
+	}
+	account, ok := requireSessionAccount(c)
+	if !ok {
 		return
 	}
 
@@ -172,7 +186,7 @@ func (a *MCPAuth) CreateToken(c *gin.Context) {
 		return
 	}
 
-	record, generated, err := a.createToken(req.Name, req.Token)
+	record, generated, err := a.createToken(c.Request.Context(), account.AccountID, req.Name, req.Token)
 	if err != nil {
 		switch {
 		case errors.Is(err, errTrustedTokenNameRequired),
@@ -206,6 +220,10 @@ func (a *MCPAuth) DeleteToken(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "token store is unavailable"})
 		return
 	}
+	account, ok := requireSessionAccount(c)
+	if !ok {
+		return
+	}
 
 	tokenID := strings.TrimSpace(c.Param("token_id"))
 	if tokenID == "" {
@@ -213,7 +231,7 @@ func (a *MCPAuth) DeleteToken(c *gin.Context) {
 		return
 	}
 
-	err := a.deleteToken(tokenID)
+	err := a.deleteToken(c.Request.Context(), tokenID, account.AccountID)
 	if err != nil {
 		if errors.Is(err, errTrustedTokenNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "token not found"})
@@ -236,7 +254,14 @@ func (a *MCPAuth) GetTokenValue(c *gin.Context) {
 	})
 }
 
-func (a *MCPAuth) createToken(name string, tokenInput *string) (trustedTokenRecord, bool, error) {
+func (a *MCPAuth) createToken(ctx context.Context, accountID string, name string, tokenInput *string) (trustedTokenRecord, bool, error) {
+	normalizedAccountID := strings.TrimSpace(accountID)
+	if normalizedAccountID == "" {
+		return trustedTokenRecord{}, false, errors.New("account_id is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	normalizedName, nameKey, err := normalizeTokenName(name)
 	if err != nil {
 		return trustedTokenRecord{}, false, err
@@ -272,6 +297,7 @@ func (a *MCPAuth) createToken(name string, tokenInput *string) (trustedTokenReco
 		tokenHash := a.hasher.Hash(tokenValue)
 		record := trustedTokenRecord{
 			ID:          tokenID,
+			AccountID:   normalizedAccountID,
 			Name:        normalizedName,
 			NameKey:     nameKey,
 			Token:       tokenValue,
@@ -282,8 +308,9 @@ func (a *MCPAuth) createToken(name string, tokenInput *string) (trustedTokenReco
 			UpdatedAt:   now,
 		}
 
-		err = a.queries.InsertTrustedToken(contextBackground(), sqlc.InsertTrustedTokenParams{
+		err = a.queries.InsertTrustedToken(ctx, sqlc.InsertTrustedTokenParams{
 			TokenID:         record.ID,
+			AccountID:       record.AccountID,
 			Name:            record.Name,
 			NameKey:         record.NameKey,
 			TokenHash:       record.TokenHash,
@@ -296,20 +323,32 @@ func (a *MCPAuth) createToken(name string, tokenInput *string) (trustedTokenReco
 			return record, generated, nil
 		}
 
-		errText := strings.ToLower(err.Error())
-		switch {
-		case strings.Contains(errText, "trusted_tokens.name_key"):
-			return trustedTokenRecord{}, false, errTrustedTokenNameConflict
-		case strings.Contains(errText, "trusted_tokens.token_hash"):
-			if generated {
-				continue
+		if isSQLiteConstraintError(err) {
+			conflict, classifyErr := a.classifyTrustedTokenInsertConflict(
+				ctx,
+				record.AccountID,
+				record.NameKey,
+				record.TokenHash,
+				record.ID,
+			)
+			if classifyErr != nil {
+				return trustedTokenRecord{}, false, classifyErr
 			}
-			return trustedTokenRecord{}, false, errTrustedTokenValueConflict
-		case strings.Contains(errText, "trusted_tokens.token_id"):
-			continue
-		default:
-			return trustedTokenRecord{}, false, err
+			switch conflict {
+			case trustedTokenInsertConflictName:
+				return trustedTokenRecord{}, false, errTrustedTokenNameConflict
+			case trustedTokenInsertConflictTokenHash:
+				if generated {
+					continue
+				}
+				return trustedTokenRecord{}, false, errTrustedTokenValueConflict
+			case trustedTokenInsertConflictTokenID:
+				continue
+			default:
+				return trustedTokenRecord{}, false, err
+			}
 		}
+		return trustedTokenRecord{}, false, err
 	}
 
 	if generated {
@@ -318,11 +357,17 @@ func (a *MCPAuth) createToken(name string, tokenInput *string) (trustedTokenReco
 	return trustedTokenRecord{}, false, errTrustedTokenValueConflict
 }
 
-func (a *MCPAuth) deleteToken(tokenID string) error {
+func (a *MCPAuth) deleteToken(ctx context.Context, tokenID string, accountID string) error {
 	if a == nil || a.queries == nil {
 		return errors.New("token store is unavailable")
 	}
-	rows, err := a.queries.DeleteTrustedTokenByID(contextBackground(), tokenID)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := a.queries.DeleteTrustedTokenByIDAndAccount(ctx, sqlc.DeleteTrustedTokenByIDAndAccountParams{
+		TokenID:   tokenID,
+		AccountID: strings.TrimSpace(accountID),
+	})
 	if err != nil {
 		return err
 	}
@@ -330,6 +375,24 @@ func (a *MCPAuth) deleteToken(tokenID string) error {
 		return errTrustedTokenNotFound
 	}
 	return nil
+}
+
+func (a *MCPAuth) lookupTrustedToken(ctx context.Context, token string) (sqlc.TrustedToken, bool) {
+	if a == nil || a.queries == nil || a.hasher == nil {
+		return sqlc.TrustedToken{}, false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tokenHash := a.hasher.Hash(strings.TrimSpace(token))
+	record, err := a.queries.GetTrustedTokenByHash(ctx, tokenHash)
+	if err != nil {
+		return sqlc.TrustedToken{}, false
+	}
+	if strings.TrimSpace(record.AccountID) == "" {
+		return sqlc.TrustedToken{}, false
+	}
+	return record, true
 }
 
 func normalizeTokenName(value string) (string, string, error) {
@@ -410,6 +473,68 @@ func boolToInt64(value bool) int64 {
 	return 0
 }
 
-func contextBackground() context.Context {
-	return context.Background()
+type trustedTokenInsertConflict int
+
+const (
+	trustedTokenInsertConflictUnknown trustedTokenInsertConflict = iota
+	trustedTokenInsertConflictName
+	trustedTokenInsertConflictTokenHash
+	trustedTokenInsertConflictTokenID
+)
+
+func isSQLiteConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	switch sqliteErr.Code() {
+	case sqlite3.SQLITE_CONSTRAINT, sqlite3.SQLITE_CONSTRAINT_UNIQUE, sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *MCPAuth) classifyTrustedTokenInsertConflict(
+	ctx context.Context,
+	accountID string,
+	nameKey string,
+	tokenHash string,
+	tokenID string,
+) (trustedTokenInsertConflict, error) {
+	if a == nil || a.queries == nil {
+		return trustedTokenInsertConflictUnknown, nil
+	}
+
+	_, err := a.queries.GetTrustedTokenByAccountAndNameKey(ctx, sqlc.GetTrustedTokenByAccountAndNameKeyParams{
+		AccountID: accountID,
+		NameKey:   nameKey,
+	})
+	if err == nil {
+		return trustedTokenInsertConflictName, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return trustedTokenInsertConflictUnknown, err
+	}
+
+	_, err = a.queries.GetTrustedTokenByHash(ctx, tokenHash)
+	if err == nil {
+		return trustedTokenInsertConflictTokenHash, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return trustedTokenInsertConflictUnknown, err
+	}
+
+	_, err = a.queries.GetTrustedTokenByID(ctx, tokenID)
+	if err == nil {
+		return trustedTokenInsertConflictTokenID, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return trustedTokenInsertConflictUnknown, err
+	}
+
+	return trustedTokenInsertConflictUnknown, nil
 }

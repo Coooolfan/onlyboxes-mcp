@@ -1,4 +1,5 @@
 import { parseAPIError, request } from '@/services/http'
+import type { AccountProfile, ConsoleSessionPayload, RegisterAccountPayload } from '@/types/auth'
 
 export class InvalidCredentialsError extends Error {
   constructor() {
@@ -11,7 +12,31 @@ export function isInvalidCredentialsError(error: unknown): error is InvalidCrede
   return error instanceof InvalidCredentialsError
 }
 
-export async function loginAPI(username: string, password: string): Promise<void> {
+function parseAccountProfile(payload: unknown): AccountProfile {
+  const value = payload as Partial<AccountProfile> | null
+  const accountID = value?.account_id?.trim() ?? ''
+  const username = value?.username?.trim() ?? ''
+  const isAdmin = value?.is_admin === true
+  if (!accountID || !username) {
+    throw new Error('API returned invalid account profile.')
+  }
+  return {
+    account_id: accountID,
+    username,
+    is_admin: isAdmin,
+  }
+}
+
+function parseSessionPayload(payload: unknown): ConsoleSessionPayload {
+  const value = payload as Partial<ConsoleSessionPayload> | null
+  return {
+    authenticated: value?.authenticated === true,
+    account: parseAccountProfile(value?.account),
+    registration_enabled: value?.registration_enabled === true,
+  }
+}
+
+export async function loginAPI(username: string, password: string): Promise<ConsoleSessionPayload> {
   const response = await fetch('/api/v1/console/login', {
     method: 'POST',
     headers: {
@@ -28,6 +53,8 @@ export async function loginAPI(username: string, password: string): Promise<void
   if (!response.ok) {
     throw new Error(await parseAPIError(response))
   }
+
+  return parseSessionPayload(await response.json())
 }
 
 export async function logoutAPI(): Promise<void> {
@@ -40,9 +67,34 @@ export async function logoutAPI(): Promise<void> {
   })
 }
 
-export async function probeSessionAPI(): Promise<void> {
-  const response = await request('/api/v1/workers/stats?stale_after_sec=30')
+export async function probeSessionAPI(): Promise<ConsoleSessionPayload> {
+  const response = await request('/api/v1/console/session')
   if (!response.ok) {
     throw new Error(await parseAPIError(response))
+  }
+  return parseSessionPayload(await response.json())
+}
+
+export async function createAccountAPI(
+  username: string,
+  password: string,
+): Promise<RegisterAccountPayload> {
+  const response = await request('/api/v1/console/register', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ username, password }),
+  })
+  if (!response.ok) {
+    throw new Error(await parseAPIError(response))
+  }
+
+  const payload = (await response.json()) as Partial<RegisterAccountPayload> | null
+  return {
+    account: parseAccountProfile(payload?.account),
+    created_at: typeof payload?.created_at === 'string' ? payload.created_at : '',
+    updated_at: typeof payload?.updated_at === 'string' ? payload.updated_at : '',
   }
 }

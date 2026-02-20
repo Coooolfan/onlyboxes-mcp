@@ -26,8 +26,7 @@ body {
   color: var(--text-primary);
   background:
     radial-gradient(1200px 700px at 0% 0%, #fbeed7 0%, transparent 65%),
-    radial-gradient(1000px 620px at 100% 0%, #dff6ff 0%, transparent 62%),
-    var(--bg);
+    radial-gradient(1000px 620px at 100% 0%, #dff6ff 0%, transparent 62%), var(--bg);
 }
 
 #app {
@@ -38,7 +37,10 @@ button {
   border: none;
   font: inherit;
   cursor: pointer;
-  transition: transform 140ms ease, opacity 140ms ease, background-color 140ms ease;
+  transition:
+    transform 140ms ease,
+    opacity 140ms ease,
+    background-color 140ms ease;
 }
 
 button:disabled {
@@ -78,6 +80,33 @@ button:not(:disabled):hover {
 .small {
   padding: 8px 12px;
   font-size: 12px;
+}
+
+.field-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.field-input {
+  width: 100%;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font: inherit;
+  outline: none;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.field-input:focus {
+  border-color: #5b7cff;
+  box-shadow: 0 0 0 3px rgba(91, 124, 255, 0.18);
 }
 
 @keyframes rise-in {

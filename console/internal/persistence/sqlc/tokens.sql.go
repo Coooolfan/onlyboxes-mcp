@@ -9,22 +9,66 @@ import (
 	"context"
 )
 
-const deleteTrustedTokenByID = `-- name: DeleteTrustedTokenByID :execrows
+const deleteTrustedTokenByIDAndAccount = `-- name: DeleteTrustedTokenByIDAndAccount :execrows
 DELETE FROM trusted_tokens
-WHERE token_id = ?
+WHERE token_id = ? AND account_id = ?
 `
 
-func (q *Queries) DeleteTrustedTokenByID(ctx context.Context, tokenID string) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteTrustedTokenByID, tokenID)
+type DeleteTrustedTokenByIDAndAccountParams struct {
+	TokenID   string `json:"token_id"`
+	AccountID string `json:"account_id"`
+}
+
+func (q *Queries) DeleteTrustedTokenByIDAndAccount(ctx context.Context, arg DeleteTrustedTokenByIDAndAccountParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteTrustedTokenByIDAndAccount, arg.TokenID, arg.AccountID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
 }
 
+const getTrustedTokenByAccountAndNameKey = `-- name: GetTrustedTokenByAccountAndNameKey :one
+SELECT
+    token_id,
+    account_id,
+    name,
+    name_key,
+    token_hash,
+    token_masked,
+    generated,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM trusted_tokens
+WHERE account_id = ? AND name_key = ?
+LIMIT 1
+`
+
+type GetTrustedTokenByAccountAndNameKeyParams struct {
+	AccountID string `json:"account_id"`
+	NameKey   string `json:"name_key"`
+}
+
+func (q *Queries) GetTrustedTokenByAccountAndNameKey(ctx context.Context, arg GetTrustedTokenByAccountAndNameKeyParams) (TrustedToken, error) {
+	row := q.db.QueryRowContext(ctx, getTrustedTokenByAccountAndNameKey, arg.AccountID, arg.NameKey)
+	var i TrustedToken
+	err := row.Scan(
+		&i.TokenID,
+		&i.AccountID,
+		&i.Name,
+		&i.NameKey,
+		&i.TokenHash,
+		&i.TokenMasked,
+		&i.Generated,
+		&i.CreatedAtUnixMs,
+		&i.UpdatedAtUnixMs,
+	)
+	return i, err
+}
+
 const getTrustedTokenByHash = `-- name: GetTrustedTokenByHash :one
 SELECT
     token_id,
+    account_id,
     name,
     name_key,
     token_hash,
@@ -42,6 +86,7 @@ func (q *Queries) GetTrustedTokenByHash(ctx context.Context, tokenHash string) (
 	var i TrustedToken
 	err := row.Scan(
 		&i.TokenID,
+		&i.AccountID,
 		&i.Name,
 		&i.NameKey,
 		&i.TokenHash,
@@ -56,6 +101,7 @@ func (q *Queries) GetTrustedTokenByHash(ctx context.Context, tokenHash string) (
 const getTrustedTokenByID = `-- name: GetTrustedTokenByID :one
 SELECT
     token_id,
+    account_id,
     name,
     name_key,
     token_hash,
@@ -73,6 +119,7 @@ func (q *Queries) GetTrustedTokenByID(ctx context.Context, tokenID string) (Trus
 	var i TrustedToken
 	err := row.Scan(
 		&i.TokenID,
+		&i.AccountID,
 		&i.Name,
 		&i.NameKey,
 		&i.TokenHash,
@@ -87,6 +134,7 @@ func (q *Queries) GetTrustedTokenByID(ctx context.Context, tokenID string) (Trus
 const insertTrustedToken = `-- name: InsertTrustedToken :exec
 INSERT INTO trusted_tokens (
     token_id,
+    account_id,
     name,
     name_key,
     token_hash,
@@ -94,11 +142,12 @@ INSERT INTO trusted_tokens (
     generated,
     created_at_unix_ms,
     updated_at_unix_ms
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertTrustedTokenParams struct {
 	TokenID         string `json:"token_id"`
+	AccountID       string `json:"account_id"`
 	Name            string `json:"name"`
 	NameKey         string `json:"name_key"`
 	TokenHash       string `json:"token_hash"`
@@ -111,6 +160,7 @@ type InsertTrustedTokenParams struct {
 func (q *Queries) InsertTrustedToken(ctx context.Context, arg InsertTrustedTokenParams) error {
 	_, err := q.db.ExecContext(ctx, insertTrustedToken,
 		arg.TokenID,
+		arg.AccountID,
 		arg.Name,
 		arg.NameKey,
 		arg.TokenHash,
@@ -122,9 +172,10 @@ func (q *Queries) InsertTrustedToken(ctx context.Context, arg InsertTrustedToken
 	return err
 }
 
-const listTrustedTokens = `-- name: ListTrustedTokens :many
+const listTrustedTokensByAccount = `-- name: ListTrustedTokensByAccount :many
 SELECT
     token_id,
+    account_id,
     name,
     name_key,
     token_hash,
@@ -133,11 +184,12 @@ SELECT
     created_at_unix_ms,
     updated_at_unix_ms
 FROM trusted_tokens
+WHERE account_id = ?
 ORDER BY created_at_unix_ms ASC, token_id ASC
 `
 
-func (q *Queries) ListTrustedTokens(ctx context.Context) ([]TrustedToken, error) {
-	rows, err := q.db.QueryContext(ctx, listTrustedTokens)
+func (q *Queries) ListTrustedTokensByAccount(ctx context.Context, accountID string) ([]TrustedToken, error) {
+	rows, err := q.db.QueryContext(ctx, listTrustedTokensByAccount, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +199,7 @@ func (q *Queries) ListTrustedTokens(ctx context.Context) ([]TrustedToken, error)
 		var i TrustedToken
 		if err := rows.Scan(
 			&i.TokenID,
+			&i.AccountID,
 			&i.Name,
 			&i.NameKey,
 			&i.TokenHash,

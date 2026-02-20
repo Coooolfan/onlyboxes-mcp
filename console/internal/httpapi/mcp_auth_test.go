@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,7 @@ import (
 func TestMCPAuthRequireTokenRejectsMissingHeader(t *testing.T) {
 	auth := newBareTestMCPAuth()
 	token := "token-a"
-	if _, _, err := auth.createToken("token-a", &token); err != nil {
+	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
 	router := gin.New()
@@ -33,7 +34,7 @@ func TestMCPAuthRequireTokenRejectsMissingHeader(t *testing.T) {
 func TestMCPAuthRequireTokenRejectsOldHeader(t *testing.T) {
 	auth := newBareTestMCPAuth()
 	token := "token-a"
-	if _, _, err := auth.createToken("token-a", &token); err != nil {
+	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
 	router := gin.New()
@@ -54,7 +55,7 @@ func TestMCPAuthRequireTokenRejectsOldHeader(t *testing.T) {
 func TestMCPAuthRequireTokenRejectsWrongToken(t *testing.T) {
 	auth := newBareTestMCPAuth()
 	token := "token-a"
-	if _, _, err := auth.createToken("token-a", &token); err != nil {
+	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
 	router := gin.New()
@@ -75,16 +76,16 @@ func TestMCPAuthRequireTokenRejectsWrongToken(t *testing.T) {
 func TestMCPAuthRequireTokenAllowsTrustedToken(t *testing.T) {
 	auth := newBareTestMCPAuth()
 	token := "token-a"
-	if _, _, err := auth.createToken("token-a", &token); err != nil {
+	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
 		t.Fatalf("seed token: %v", err)
 	}
 	router := gin.New()
 	router.GET("/mcp", auth.RequireToken(), func(c *gin.Context) {
-		if got := requestOwnerIDFromGin(c); got != ownerIDFromToken("token-a") {
-			t.Fatalf("expected owner id in gin context, got %q", got)
+		if got := requestOwnerIDFromGin(c); got != testDashboardAccountID {
+			t.Fatalf("expected owner id in gin context=%q, got %q", testDashboardAccountID, got)
 		}
-		if got := requestOwnerIDFromContext(c.Request.Context()); got != ownerIDFromToken("token-a") {
-			t.Fatalf("expected owner id in request context, got %q", got)
+		if got := requestOwnerIDFromContext(c.Request.Context()); got != testDashboardAccountID {
+			t.Fatalf("expected owner id in request context=%q, got %q", testDashboardAccountID, got)
 		}
 		c.Status(http.StatusOK)
 	})
@@ -119,6 +120,7 @@ func TestMCPAuthRequireTokenRejectsWhenStoreIsEmpty(t *testing.T) {
 func TestMCPAuthTokenCRUD(t *testing.T) {
 	auth := newBareTestMCPAuth()
 	router := gin.New()
+	router.Use(withTestSessionAccount(SessionAccount{AccountID: testDashboardAccountID, Username: testDashboardUsername, IsAdmin: true}))
 	router.POST("/tokens", auth.CreateToken)
 	router.GET("/tokens", auth.ListTokens)
 	router.GET("/tokens/:token_id/value", auth.GetTokenValue)
@@ -205,6 +207,7 @@ func TestMCPAuthTokenCRUD(t *testing.T) {
 func TestMCPAuthCreateTokenConflicts(t *testing.T) {
 	auth := newBareTestMCPAuth()
 	router := gin.New()
+	router.Use(withTestSessionAccount(SessionAccount{AccountID: testDashboardAccountID, Username: testDashboardUsername, IsAdmin: true}))
 	router.POST("/tokens", auth.CreateToken)
 
 	firstReq := httptest.NewRequest(http.MethodPost, "/tokens", strings.NewReader(`{"name":"CI Prod","token":"manual-token-1"}`))
@@ -229,5 +232,71 @@ func TestMCPAuthCreateTokenConflicts(t *testing.T) {
 	router.ServeHTTP(dupValueRec, dupValueReq)
 	if dupValueRec.Code != http.StatusConflict {
 		t.Fatalf("expected duplicate value status 409, got %d body=%s", dupValueRec.Code, dupValueRec.Body.String())
+	}
+}
+
+func TestMCPAuthTokenIsolationByAccount(t *testing.T) {
+	auth := newBareTestMCPAuth()
+	secondAccount := SessionAccount{AccountID: "acc-test-member-b", Username: "member-b", IsAdmin: false}
+	seedTestAccount(auth.queries, secondAccount.AccountID, secondAccount.Username, "member-b-password", false)
+
+	routerAdmin := gin.New()
+	routerAdmin.Use(withTestSessionAccount(SessionAccount{AccountID: testDashboardAccountID, Username: testDashboardUsername, IsAdmin: true}))
+	routerAdmin.POST("/tokens", auth.CreateToken)
+	routerAdmin.GET("/tokens", auth.ListTokens)
+	routerAdmin.DELETE("/tokens/:token_id", auth.DeleteToken)
+
+	routerMember := gin.New()
+	routerMember.Use(withTestSessionAccount(secondAccount))
+	routerMember.POST("/tokens", auth.CreateToken)
+	routerMember.GET("/tokens", auth.ListTokens)
+	routerMember.DELETE("/tokens/:token_id", auth.DeleteToken)
+
+	adminCreateReq := httptest.NewRequest(http.MethodPost, "/tokens", strings.NewReader(`{"name":"shared-name","token":"admin-token"}`))
+	adminCreateReq.Header.Set("Content-Type", "application/json")
+	adminCreateRec := httptest.NewRecorder()
+	routerAdmin.ServeHTTP(adminCreateRec, adminCreateReq)
+	if adminCreateRec.Code != http.StatusCreated {
+		t.Fatalf("admin create token expected 201, got %d body=%s", adminCreateRec.Code, adminCreateRec.Body.String())
+	}
+	adminPayload := createTrustedTokenResponse{}
+	if err := json.Unmarshal(adminCreateRec.Body.Bytes(), &adminPayload); err != nil {
+		t.Fatalf("decode admin create response: %v", err)
+	}
+
+	memberCreateReq := httptest.NewRequest(http.MethodPost, "/tokens", strings.NewReader(`{"name":"shared-name","token":"member-token"}`))
+	memberCreateReq.Header.Set("Content-Type", "application/json")
+	memberCreateRec := httptest.NewRecorder()
+	routerMember.ServeHTTP(memberCreateRec, memberCreateReq)
+	if memberCreateRec.Code != http.StatusCreated {
+		t.Fatalf("member create token expected 201, got %d body=%s", memberCreateRec.Code, memberCreateRec.Body.String())
+	}
+
+	adminListReq := httptest.NewRequest(http.MethodGet, "/tokens", nil)
+	adminListRec := httptest.NewRecorder()
+	routerAdmin.ServeHTTP(adminListRec, adminListReq)
+	if adminListRec.Code != http.StatusOK {
+		t.Fatalf("admin list expected 200, got %d", adminListRec.Code)
+	}
+	adminList := trustedTokenListResponse{}
+	if err := json.Unmarshal(adminListRec.Body.Bytes(), &adminList); err != nil {
+		t.Fatalf("decode admin list: %v", err)
+	}
+	if adminList.Total != 1 {
+		t.Fatalf("expected admin to see 1 token, got %d", adminList.Total)
+	}
+
+	memberDeleteAdminTokenReq := httptest.NewRequest(http.MethodDelete, "/tokens/"+adminPayload.ID, nil)
+	memberDeleteAdminTokenRec := httptest.NewRecorder()
+	routerMember.ServeHTTP(memberDeleteAdminTokenRec, memberDeleteAdminTokenReq)
+	if memberDeleteAdminTokenRec.Code != http.StatusNotFound {
+		t.Fatalf("expected member delete admin token -> 404, got %d body=%s", memberDeleteAdminTokenRec.Code, memberDeleteAdminTokenRec.Body.String())
+	}
+}
+
+func withTestSessionAccount(account SessionAccount) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		setRequestSessionAccount(c, account)
+		c.Next()
 	}
 }

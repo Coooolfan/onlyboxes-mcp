@@ -2,8 +2,6 @@ package persistence
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -103,9 +101,9 @@ func TestOpenRunsMigrationAndStartupRecovery(t *testing.T) {
 	}
 }
 
-func TestDashboardCredentialTableSupportsDeleteAndReinsert(t *testing.T) {
+func TestAccountsTableSupportsInsertAndLookup(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "console-dashboard.db")
+	path := filepath.Join(t.TempDir(), "console-accounts.db")
 	nowMS := time.Now().UnixMilli()
 
 	db, err := Open(ctx, Options{
@@ -121,43 +119,36 @@ func TestDashboardCredentialTableSupportsDeleteAndReinsert(t *testing.T) {
 		_ = db.Close()
 	}()
 
-	insert := func(username string, secret string) {
-		t.Helper()
-		err := db.Queries.InsertDashboardCredential(ctx, sqlc.InsertDashboardCredentialParams{
-			SingletonID:     1,
-			Username:        username,
-			PasswordHash:    db.Hasher.Hash(secret),
-			HashAlgo:        HashAlgorithmHMACSHA256,
-			CreatedAtUnixMs: nowMS,
-			UpdatedAtUnixMs: nowMS,
-		})
-		if err != nil {
-			t.Fatalf("insert dashboard credential: %v", err)
-		}
-	}
-
-	insert("admin-a", "secret-a")
-
-	deleted, err := db.Queries.DeleteDashboardCredential(ctx)
+	err = db.Queries.InsertAccount(ctx, sqlc.InsertAccountParams{
+		AccountID:       "acc-test-admin",
+		Username:        "admin-test",
+		UsernameKey:     "admin-test",
+		PasswordHash:    db.Hasher.Hash("secret"),
+		HashAlgo:        HashAlgorithmHMACSHA256,
+		IsAdmin:         1,
+		CreatedAtUnixMs: nowMS,
+		UpdatedAtUnixMs: nowMS,
+	})
 	if err != nil {
-		t.Fatalf("delete dashboard credential: %v", err)
-	}
-	if deleted != 1 {
-		t.Fatalf("expected 1 row deleted, got %d", deleted)
+		t.Fatalf("insert account: %v", err)
 	}
 
-	_, err = db.Queries.GetDashboardCredential(ctx)
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("expected sql.ErrNoRows after delete, got %v", err)
-	}
-
-	insert("admin-b", "secret-b")
-
-	stored, err := db.Queries.GetDashboardCredential(ctx)
+	adminCount, err := db.Queries.CountAdminAccounts(ctx)
 	if err != nil {
-		t.Fatalf("get dashboard credential after reinsert: %v", err)
+		t.Fatalf("count admin accounts: %v", err)
 	}
-	if stored.Username != "admin-b" {
-		t.Fatalf("unexpected username after reinsert: %q", stored.Username)
+	if adminCount != 1 {
+		t.Fatalf("expected 1 admin account, got %d", adminCount)
+	}
+
+	stored, err := db.Queries.GetAccountByUsernameKey(ctx, "admin-test")
+	if err != nil {
+		t.Fatalf("get account by username key: %v", err)
+	}
+	if stored.AccountID != "acc-test-admin" {
+		t.Fatalf("unexpected account id: %q", stored.AccountID)
+	}
+	if stored.IsAdmin != 1 {
+		t.Fatalf("expected is_admin=1, got %d", stored.IsAdmin)
 	}
 }

@@ -1,21 +1,17 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
-import router from '@/router'
 import { isUnauthorizedError } from '@/services/http'
 import {
-  createTrustedTokenAPI,
   createWorkerAPI,
-  deleteTrustedTokenAPI,
   deleteWorkerAPI,
-  fetchTrustedTokensAPI,
   fetchWorkersAPI,
   fetchWorkerStatsAPI,
 } from '@/services/workers.api'
+import { redirectToLogin } from '@/stores/auth-redirect'
 import { useAuthStore } from '@/stores/auth'
+import { formatDateTime } from '@/utils/datetime'
 import type {
-  TrustedTokenCreateResponse,
-  TrustedTokenItem,
   WorkerItem,
   WorkerListResponse,
   WorkerStartupCommandResponse,
@@ -63,12 +59,9 @@ export const useWorkersStore = defineStore('workers', () => {
   const autoRefreshEnabled = ref(true)
   const creatingWorker = ref(false)
   const deletingNodeID = ref('')
-  const creatingTrustedToken = ref(false)
-  const deletingTrustedTokenID = ref('')
 
   const dashboardStats = ref<WorkerStatsResponse>(emptyStats())
   const currentList = ref<WorkerListResponse | null>(null)
-  const trustedTokens = ref<TrustedTokenItem[]>([])
 
   let timer: ReturnType<typeof setInterval> | null = null
   let loadRequestSerial = 0
@@ -99,23 +92,15 @@ export const useWorkersStore = defineStore('workers', () => {
   function resetDashboard(): void {
     currentList.value = null
     dashboardStats.value = emptyStats()
-    trustedTokens.value = []
     refreshedAt.value = null
     page.value = 1
   }
 
-  async function redirectToLogin(): Promise<void> {
-    const authStore = useAuthStore()
-    authStore.logoutLocal()
-    resetDashboard()
-    errorMessage.value = ''
-
-    if (router.currentRoute.value.path !== '/login') {
-      await router.replace({
-        path: '/login',
-        query: { redirect: router.currentRoute.value.fullPath },
-      })
-    }
+  async function handleUnauthorized(): Promise<void> {
+    await redirectToLogin(() => {
+      resetDashboard()
+      errorMessage.value = ''
+    })
   }
 
   async function loadDashboard(): Promise<void> {
@@ -128,10 +113,9 @@ export const useWorkersStore = defineStore('workers', () => {
     errorMessage.value = ''
 
     try {
-      const [statsRes, listRes, trustedTokensRes] = await Promise.all([
+      const [statsRes, listRes] = await Promise.all([
         fetchWorkerStatsAPI(staleAfterDefaultSec, controller.signal),
         fetchWorkersAPI(statusFilter.value, page.value, pageSize, controller.signal),
-        fetchTrustedTokensAPI(controller.signal),
       ])
 
       if (requestSerial !== loadRequestSerial || controller.signal.aborted) {
@@ -140,7 +124,6 @@ export const useWorkersStore = defineStore('workers', () => {
 
       dashboardStats.value = statsRes
       currentList.value = listRes
-      trustedTokens.value = trustedTokensRes.items ?? []
       refreshedAt.value = parseTimestamp(statsRes.generated_at) ?? new Date()
 
       if (page.value > totalPages.value) {
@@ -152,7 +135,7 @@ export const useWorkersStore = defineStore('workers', () => {
         return
       }
       if (isUnauthorizedError(error)) {
-        await redirectToLogin()
+        await handleUnauthorized()
         return
       }
       errorMessage.value = error instanceof Error ? error.message : 'Failed to load workers.'
@@ -212,27 +195,6 @@ export const useWorkersStore = defineStore('workers', () => {
     return 'Delete'
   }
 
-  function trustedTokenDeleteButtonText(tokenID: string): string {
-    if (deletingTrustedTokenID.value === tokenID) {
-      return 'Deleting...'
-    }
-    return 'Delete'
-  }
-
-  function formatDateTime(value: string): string {
-    const parsed = Date.parse(value)
-    if (Number.isNaN(parsed)) {
-      return '--'
-    }
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    }).format(new Date(parsed))
-  }
-
   function ageSeconds(value: string): number {
     const parsed = Date.parse(value)
     if (Number.isNaN(parsed)) {
@@ -288,7 +250,7 @@ export const useWorkersStore = defineStore('workers', () => {
       return payload
     } catch (error) {
       if (isUnauthorizedError(error)) {
-        await redirectToLogin()
+        await handleUnauthorized()
         return null
       }
       errorMessage.value = error instanceof Error ? error.message : 'Failed to create worker.'
@@ -322,81 +284,13 @@ export const useWorkersStore = defineStore('workers', () => {
       }
     } catch (error) {
       if (isUnauthorizedError(error)) {
-        await redirectToLogin()
+        await handleUnauthorized()
         return
       }
       errorMessage.value = error instanceof Error ? error.message : 'Failed to delete worker.'
     } finally {
       if (deletingNodeID.value === nodeID) {
         deletingNodeID.value = ''
-      }
-    }
-  }
-
-  async function createTrustedToken(payload: { name: string }): Promise<TrustedTokenCreateResponse> {
-    if (creatingTrustedToken.value) {
-      throw new Error('Trusted token creation already in progress.')
-    }
-
-    const name = payload.name.trim()
-    if (!name) {
-      errorMessage.value = 'name is required'
-      throw new Error('name is required')
-    }
-
-    creatingTrustedToken.value = true
-    errorMessage.value = ''
-
-    try {
-      const created = await createTrustedTokenAPI({
-        name,
-      })
-      const tokenValue = created.token.trim()
-      if (!tokenValue) {
-        throw new Error('API returned empty token value.')
-      }
-      await loadDashboard()
-      return {
-        ...created,
-        token: tokenValue,
-      }
-    } catch (error) {
-      if (isUnauthorizedError(error)) {
-        await redirectToLogin()
-      }
-      errorMessage.value = error instanceof Error ? error.message : 'Failed to create trusted token.'
-      throw error
-    } finally {
-      creatingTrustedToken.value = false
-    }
-  }
-
-  function confirmDeleteTrustedToken(tokenID: string): boolean {
-    if (typeof window === 'undefined' || typeof window.confirm !== 'function') {
-      return true
-    }
-    return window.confirm(`Delete token ${tokenID}?`)
-  }
-
-  async function deleteTrustedToken(tokenID: string): Promise<void> {
-    if (!tokenID || deletingTrustedTokenID.value === tokenID || !confirmDeleteTrustedToken(tokenID)) {
-      return
-    }
-
-    deletingTrustedTokenID.value = tokenID
-    errorMessage.value = ''
-    try {
-      await deleteTrustedTokenAPI(tokenID)
-      await loadDashboard()
-    } catch (error) {
-      if (isUnauthorizedError(error)) {
-        await redirectToLogin()
-        return
-      }
-      errorMessage.value = error instanceof Error ? error.message : 'Failed to delete trusted token.'
-    } finally {
-      if (deletingTrustedTokenID.value === tokenID) {
-        deletingTrustedTokenID.value = ''
       }
     }
   }
@@ -456,11 +350,8 @@ export const useWorkersStore = defineStore('workers', () => {
     autoRefreshEnabled,
     creatingWorker,
     deletingNodeID,
-    creatingTrustedToken,
-    deletingTrustedTokenID,
     dashboardStats,
     currentList,
-    trustedTokens,
     totalWorkers,
     onlineWorkers,
     offlineWorkers,
@@ -477,15 +368,12 @@ export const useWorkersStore = defineStore('workers', () => {
     previousPage,
     nextPage,
     deleteWorkerButtonText,
-    trustedTokenDeleteButtonText,
     formatDateTime,
     formatAge,
     formatCapabilities,
     formatLabels,
     createWorker,
     deleteWorker,
-    createTrustedToken,
-    deleteTrustedToken,
     toggleAutoRefresh,
     startAutoRefresh,
     stopAutoRefresh,

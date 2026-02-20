@@ -22,7 +22,12 @@ const emit = defineEmits<{
     </div>
 
     <div class="header-actions">
-      <button class="primary-btn" type="button" :disabled="creatingWorker" @click="emit('addWorker')">
+      <button
+        class="primary-btn"
+        type="button"
+        :disabled="creatingWorker"
+        @click="emit('addWorker')"
+      >
         {{ creatingWorker ? 'Adding...' : 'Add Worker' }}
       </button>
       <button class="ghost-btn" type="button" @click="emit('toggleAutoRefresh')">

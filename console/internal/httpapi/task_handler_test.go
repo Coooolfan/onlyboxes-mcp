@@ -39,7 +39,7 @@ func TestSubmitTaskAccepted(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, &fakeTaskDispatcher{
 		submit: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
-			if req.OwnerID != ownerIDFromToken(testMCPToken) {
+			if req.OwnerID != testDashboardAccountID {
 				t.Fatalf("expected owner_id from token, got %q", req.OwnerID)
 			}
 			return grpcserver.SubmitTaskResult{
@@ -210,7 +210,7 @@ func TestGetTask(t *testing.T) {
 			if taskID != "task-3" {
 				return grpcserver.TaskSnapshot{}, false
 			}
-			if ownerID != ownerIDFromToken(testMCPToken) {
+			if ownerID != testDashboardAccountID {
 				t.Fatalf("expected owner_id from token, got %q", ownerID)
 			}
 			return grpcserver.TaskSnapshot{
@@ -256,7 +256,7 @@ func TestCancelTaskTerminalConflict(t *testing.T) {
 			return grpcserver.TaskSnapshot{}, false
 		},
 		cancel: func(taskID string, ownerID string) (grpcserver.TaskSnapshot, error) {
-			if ownerID != ownerIDFromToken(testMCPToken) {
+			if ownerID != testDashboardAccountID {
 				t.Fatalf("expected owner_id from token, got %q", ownerID)
 			}
 			completed := now.Add(2 * time.Second)

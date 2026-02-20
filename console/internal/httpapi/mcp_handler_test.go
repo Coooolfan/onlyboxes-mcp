@@ -302,7 +302,7 @@ func TestMCPToolCallPythonExecSuccess(t *testing.T) {
 			if req.Capability != pythonExecCapabilityName {
 				t.Fatalf("expected capability=%q, got %q", pythonExecCapabilityName, req.Capability)
 			}
-			if req.OwnerID != ownerIDFromToken(testMCPToken) {
+			if req.OwnerID != testDashboardAccountID {
 				t.Fatalf("expected owner_id from token, got %q", req.OwnerID)
 			}
 			var payload pythonExecPayload
@@ -357,7 +357,7 @@ func TestMCPToolCallTerminalExecSuccess(t *testing.T) {
 			if req.Capability != terminalExecCapabilityName {
 				t.Fatalf("expected capability=%q, got %q", terminalExecCapabilityName, req.Capability)
 			}
-			if req.OwnerID != ownerIDFromToken(testMCPToken) {
+			if req.OwnerID != testDashboardAccountID {
 				t.Fatalf("expected owner_id from token, got %q", req.OwnerID)
 			}
 
@@ -412,7 +412,7 @@ func TestMCPToolCallReadImageSuccess(t *testing.T) {
 			if req.Capability != terminalResourceCapabilityName {
 				t.Fatalf("expected capability=%q, got %q", terminalResourceCapabilityName, req.Capability)
 			}
-			if req.OwnerID != ownerIDFromToken(testMCPToken) {
+			if req.OwnerID != testDashboardAccountID {
 				t.Fatalf("expected owner_id from token, got %q", req.OwnerID)
 			}
 			payload := mcpTerminalResourcePayload{}
