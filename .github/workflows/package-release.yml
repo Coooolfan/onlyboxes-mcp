@@ -79,6 +79,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
+          cache-dependency-path: |
+            console/go.sum
+            worker/worker-docker/go.sum
 
       - name: Build linux amd64 binaries
         shell: bash
