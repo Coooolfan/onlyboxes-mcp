@@ -15,14 +15,14 @@ permissions:
   contents: write
 
 jobs:
-  package:
+  resolve-version:
     runs-on: ubuntu-latest
+    outputs:
+      version_raw: ${{ steps.version.outputs.version_raw }}
+      version_safe: ${{ steps.version.outputs.version_safe }}
+      console_bin: ${{ steps.version.outputs.console_bin }}
+      worker_bin: ${{ steps.version.outputs.worker_bin }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
-
       - name: Resolve version
         id: version
         shell: bash
@@ -52,6 +52,15 @@ jobs:
           echo "console_bin=${console_bin}" >> "${GITHUB_OUTPUT}"
           echo "worker_bin=${worker_bin}" >> "${GITHUB_OUTPUT}"
 
+  build-console:
+    runs-on: ubuntu-latest
+    needs: resolve-version
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -65,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           yarn --cwd web install --immutable
-          VITE_CONSOLE_VERSION="${{ steps.version.outputs.version_raw }}" yarn --cwd web build
+          VITE_CONSOLE_VERSION="${{ needs.resolve-version.outputs.version_raw }}" yarn --cwd web build
 
       - name: Sync web dist into console embedded assets
         shell: bash
@@ -79,11 +88,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
-          cache-dependency-path: |
-            console/go.sum
-            worker/worker-docker/go.sum
+          cache-dependency-path: console/go.sum
 
-      - name: Build linux amd64 binaries
+      - name: Build console linux amd64 binary
         shell: bash
         run: |
           set -euo pipefail
@@ -91,28 +98,107 @@ jobs:
           (
             cd console
             CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-              -ldflags "-X github.com/onlyboxes/onlyboxes/console/internal/buildinfo.Version=${{ steps.version.outputs.version_raw }}" \
-              -o "../build/${{ steps.version.outputs.console_bin }}" \
+              -ldflags "-X github.com/onlyboxes/onlyboxes/console/internal/buildinfo.Version=${{ needs.resolve-version.outputs.version_raw }}" \
+              -o "../build/${{ needs.resolve-version.outputs.console_bin }}" \
               ./cmd/console
           )
-          (
-            cd worker/worker-docker
-            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-              -ldflags "-X github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/buildinfo.Version=${{ steps.version.outputs.version_raw }}" \
-              -o "../../build/${{ steps.version.outputs.worker_bin }}" \
-              ./cmd/worker-docker
-          )
 
-      - name: Validate ELF architecture
+      - name: Validate console ELF architecture
         shell: bash
         run: |
           set -euo pipefail
-          console_info="$(file "build/${{ steps.version.outputs.console_bin }}")"
-          worker_info="$(file "build/${{ steps.version.outputs.worker_bin }}")"
+          console_info="$(file "build/${{ needs.resolve-version.outputs.console_bin }}")"
           echo "${console_info}"
-          echo "${worker_info}"
           grep -Eq "ELF 64-bit.*x86-64" <<< "${console_info}"
+
+      - name: Upload console workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onlyboxes-console-linux-amd64-${{ needs.resolve-version.outputs.version_safe }}
+          path: build/${{ needs.resolve-version.outputs.console_bin }}
+          if-no-files-found: error
+
+      - name: Upload console release asset
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${{ needs.resolve-version.outputs.version_raw }}" \
+            "build/${{ needs.resolve-version.outputs.console_bin }}" \
+            --clobber
+
+  build-worker:
+    runs-on: ubuntu-latest
+    needs: resolve-version
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache-dependency-path: worker/worker-docker/go.sum
+
+      - name: Build worker linux amd64 binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          (
+            cd worker/worker-docker
+            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+              -ldflags "-X github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/buildinfo.Version=${{ needs.resolve-version.outputs.version_raw }}" \
+              -o "../../build/${{ needs.resolve-version.outputs.worker_bin }}" \
+              ./cmd/worker-docker
+          )
+
+      - name: Validate worker ELF architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          worker_info="$(file "build/${{ needs.resolve-version.outputs.worker_bin }}")"
+          echo "${worker_info}"
           grep -Eq "ELF 64-bit.*x86-64" <<< "${worker_info}"
+
+      - name: Upload worker workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onlyboxes-worker-docker-linux-amd64-${{ needs.resolve-version.outputs.version_safe }}
+          path: build/${{ needs.resolve-version.outputs.worker_bin }}
+          if-no-files-found: error
+
+      - name: Upload worker release asset
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${{ needs.resolve-version.outputs.version_raw }}" \
+            "build/${{ needs.resolve-version.outputs.worker_bin }}" \
+            --clobber
+
+  docker-console:
+    runs-on: ubuntu-latest
+    needs:
+      - resolve-version
+      - build-console
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+
+      - name: Download console binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: onlyboxes-console-linux-amd64-${{ needs.resolve-version.outputs.version_safe }}
+          path: build
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -127,7 +213,7 @@ jobs:
         id: docker_tags
         shell: bash
         env:
-          VERSION_SAFE: ${{ steps.version.outputs.version_safe }}
+          VERSION_SAFE: ${{ needs.resolve-version.outputs.version_safe }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -euo pipefail
@@ -145,13 +231,12 @@ jobs:
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Prepare Docker build contexts
+      - name: Prepare Docker build context
         shell: bash
         run: |
           set -euo pipefail
-
           mkdir -p build/docker/console
-          cp "build/${{ steps.version.outputs.console_bin }}" "build/docker/console/onlyboxes-console"
+          cp "build/${{ needs.resolve-version.outputs.console_bin }}" "build/docker/console/onlyboxes-console"
           cp docker/console.dockerfile "build/docker/console/Dockerfile"
 
       - name: Build and push console image
@@ -162,24 +247,3 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.docker_tags.outputs.console_tags }}
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: onlyboxes-linux-amd64-${{ steps.version.outputs.version_safe }}
-          path: |
-            build/${{ steps.version.outputs.console_bin }}
-            build/${{ steps.version.outputs.worker_bin }}
-          if-no-files-found: error
-
-      - name: Upload release assets
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release upload "${{ steps.version.outputs.version_raw }}" \
-            "build/${{ steps.version.outputs.console_bin }}" \
-            "build/${{ steps.version.outputs.worker_bin }}" \
-            --clobber
