@@ -21,5 +21,5 @@ Make sure `$(go env GOPATH)/bin` is in your `PATH`.
 ```
 
 ## Compatibility Rules
-- Project is pre-release; breaking protocol refactors are allowed when all in-repo consumers are updated together.
-- For external compatibility needs in the future, preserve existing field tags and avoid destructive changes.
+- Project is pre-release; protocol refactors are allowed when all in-repo consumers are updated together.
+- Keep protobuf field tags stable within one rollout to avoid generator/caller mismatches.

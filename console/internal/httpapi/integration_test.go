@@ -135,7 +135,7 @@ func TestLegacyTokenHeaderIsRejected(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Onlyboxes-MCP-Token", testMCPToken)
+	req.Header.Set("X-Onlyboxes-Token", testMCPToken)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -1342,7 +1342,7 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build cross-token get task request failed: %v", err)
 	}
-	getCrossReq.Header.Set(trustedTokenHeader, testMCPTokenB)
+	getCrossReq.Header.Set(trustedTokenHeader, "Bearer "+testMCPTokenB)
 	getCrossRes, err := http.DefaultClient.Do(getCrossReq)
 	if err != nil {
 		t.Fatalf("cross-token get task failed: %v", err)
@@ -1356,7 +1356,7 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build cross-token cancel task request failed: %v", err)
 	}
-	cancelCrossReq.Header.Set(trustedTokenHeader, testMCPTokenB)
+	cancelCrossReq.Header.Set(trustedTokenHeader, "Bearer "+testMCPTokenB)
 	cancelCrossRes, err := http.DefaultClient.Do(cancelCrossReq)
 	if err != nil {
 		t.Fatalf("cross-token cancel task failed: %v", err)
@@ -1432,7 +1432,7 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build cross-account get task request failed: %v", err)
 	}
-	getCrossAccountReq.Header.Set(trustedTokenHeader, tokenC)
+	getCrossAccountReq.Header.Set(trustedTokenHeader, "Bearer "+tokenC)
 	getCrossAccountRes, err := http.DefaultClient.Do(getCrossAccountReq)
 	if err != nil {
 		t.Fatalf("cross-account get task failed: %v", err)
@@ -1446,7 +1446,7 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build cross-account cancel task request failed: %v", err)
 	}
-	cancelCrossAccountReq.Header.Set(trustedTokenHeader, tokenC)
+	cancelCrossAccountReq.Header.Set(trustedTokenHeader, "Bearer "+tokenC)
 	cancelCrossAccountRes, err := http.DefaultClient.Do(cancelCrossAccountReq)
 	if err != nil {
 		t.Fatalf("cross-account cancel task failed: %v", err)
@@ -1630,7 +1630,7 @@ func (t *mcpTokenTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	cloned := req.Clone(req.Context())
 	cloned.Header = req.Header.Clone()
 	if strings.TrimSpace(t.token) != "" {
-		cloned.Header.Set(trustedTokenHeader, strings.TrimSpace(t.token))
+		cloned.Header.Set(trustedTokenHeader, "Bearer "+strings.TrimSpace(t.token))
 	}
 	return base.RoundTrip(cloned)
 }
@@ -1656,7 +1656,7 @@ func postJSONWithToken(url string, body string, token string) (*http.Response, e
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	if strings.TrimSpace(token) != "" {
-		req.Header.Set(trustedTokenHeader, strings.TrimSpace(token))
+		req.Header.Set(trustedTokenHeader, "Bearer "+strings.TrimSpace(token))
 	}
 	return http.DefaultClient.Do(req)
 }

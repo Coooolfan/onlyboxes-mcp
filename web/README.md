@@ -14,7 +14,7 @@ Onlyboxes worker registry dashboard (Vue 3 + Vite + TypeScript).
 - worker 列表来自 `GET /api/v1/workers`
 - 统计卡片来自 `GET /api/v1/workers/stats`
 - 创建 worker 后自动复制创建响应中的启动命令（明文 `WORKER_SECRET` 仅创建时返回一次）
-- 不提供按 worker 重新获取启动命令（`GET /api/v1/workers/:node_id/startup-command` 返回 `410 Gone`）
+- `GET /api/v1/workers/:node_id/startup-command` 固定返回 `410 Gone`
 - 节点能力列展示 `capabilities[].name` 能力声明
 - 支持 `all / online / offline` 筛选、分页、手动刷新和自动刷新
 

@@ -29,7 +29,7 @@ go run ./cmd/console
 
 账号体系说明：
 - `console` 首次初始化会创建一个管理员账号。
-- 首次初始化时，账号来源仍是 `CONSOLE_DASHBOARD_USERNAME` / `CONSOLE_DASHBOARD_PASSWORD`；缺失项会随机生成并打印。
+- 首次初始化时，账号来源是 `CONSOLE_DASHBOARD_USERNAME` / `CONSOLE_DASHBOARD_PASSWORD`；缺失项会随机生成并打印。
 - 一旦数据库中已存在账号，后续启动会忽略上述环境变量并打印忽略日志。
 - 管理员可在 `CONSOLE_ENABLE_REGISTRATION=true` 时创建非管理员账号；默认关闭。
 
@@ -39,7 +39,7 @@ go run ./cmd/console
 权限与隔离说明：
 - `GET/POST/DELETE /api/v1/workers*` 仅管理员可调用（非管理员返回 `403`）。
 - `GET/POST/DELETE /api/v1/console/tokens*` 始终仅作用于当前登录账号自己的 token。
-- MCP/commands/tasks 鉴权仍使用 `X-Onlyboxes-Token`，但 owner 隔离单位为 `account_id`：同账号多个 token 共享 task/terminal session，跨账号隔离。
+- MCP/commands/tasks 鉴权使用 `Authorization: Bearer <access-token>`，owner 隔离单位为 `account_id`：同账号多个 token 共享 task/terminal session，跨账号隔离。
 
 数据库相关环境变量：
 - `CONSOLE_DB_PATH`（默认 `./onlyboxes-console.db`）
@@ -105,13 +105,13 @@ cd worker/worker-docker
 curl -b /tmp/onlyboxes-console.cookie "http://127.0.0.1:8089/api/v1/workers?page=1&page_size=20&status=all"
 ```
 
-8. 历史接口（已废弃）：按 worker 获取启动命令（接口需登录）：
+8. 按 worker 获取启动命令（接口需登录）：
 
 ```bash
 curl -b /tmp/onlyboxes-console.cookie "http://127.0.0.1:8089/api/v1/workers/<worker_id>/startup-command"
 ```
 
-该接口现为破坏性变更：固定返回 `410 Gone`。`worker_secret` 仅在创建 worker 时返回一次，恢复路径为删除后重建 worker。
+该接口固定返回 `410 Gone`。`worker_secret` 仅在创建 worker 时返回一次，恢复路径为删除后重建 worker。
 
 9. 删除 worker（接口需登录，若 worker 在线将被立即断开）：
 
@@ -124,7 +124,7 @@ curl -b /tmp/onlyboxes-console.cookie -X DELETE "http://127.0.0.1:8089/api/v1/wo
 ```bash
 curl -X POST "http://127.0.0.1:8089/api/v1/commands/echo" \
   -H "Content-Type: application/json" \
-  -H "X-Onlyboxes-Token: <trusted_token>" \
+  -H "Authorization: Bearer <access-token>" \
   -d '{"message":"hello onlyboxes","timeout_ms":5000}'
 ```
 
@@ -141,14 +141,14 @@ curl -X POST "http://127.0.0.1:8089/api/v1/commands/echo" \
 ```bash
 curl -X POST "http://127.0.0.1:8089/api/v1/tasks" \
   -H "Content-Type: application/json" \
-  -H "X-Onlyboxes-Token: <trusted_token>" \
+  -H "Authorization: Bearer <access-token>" \
   -d '{"capability":"echo","input":{"message":"hello task"},"mode":"auto","wait_ms":1500,"timeout_ms":60000}'
 ```
 
 12. 查询任务状态：
 
 ```bash
-curl -H "X-Onlyboxes-Token: <trusted_token>" "http://127.0.0.1:8089/api/v1/tasks/<task_id>"
+curl -H "Authorization: Bearer <access-token>" "http://127.0.0.1:8089/api/v1/tasks/<task_id>"
 ```
 
 13. 调用 MCP 接口（必须带可信 token）：
@@ -157,7 +157,7 @@ curl -H "X-Onlyboxes-Token: <trusted_token>" "http://127.0.0.1:8089/api/v1/tasks
 curl -X POST "http://127.0.0.1:8089/mcp" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -H "X-Onlyboxes-Token: <trusted_token>" \
+  -H "Authorization: Bearer <access-token>" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
@@ -185,11 +185,11 @@ curl -X POST "http://127.0.0.1:8089/mcp" \
 首次访问仪表盘需要先登录，登录凭据来自 `console` 启动日志。
 
 ```bash
-yarn --cwd /web dev
+yarn --cwd web dev
 ```
 
 如需改代理目标可设置：
 
 ```bash
-VITE_API_TARGET=http://127.0.0.1:8089 yarn --cwd /web dev
+VITE_API_TARGET=http://127.0.0.1:8089 yarn --cwd web dev
 ```

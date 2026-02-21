@@ -12,20 +12,21 @@ The console service hosts:
   - `GET /api/v1/workers/stats` for aggregated worker status metrics.
   - `POST /api/v1/workers` for creating a provisioned worker (`worker_id` + `worker_secret`) and returning its startup command.
   - `DELETE /api/v1/workers/:node_id` for deleting a provisioned worker and revoking its credential (online worker is disconnected immediately).
-  - `GET /api/v1/workers/:node_id/startup-command` returns `410 Gone` (worker secret is no longer retrievable after creation; delete and recreate worker to get a new command).
+  - `GET /api/v1/workers/:node_id/startup-command` always returns `410 Gone`.
+  - `worker_secret` is returned once in `POST /api/v1/workers` response and is not queryable from read APIs.
 - command APIs (execution, token whitelist required):
   - `POST /api/v1/commands/echo` for blocking echo command execution.
   - `POST /api/v1/commands/terminal` for blocking terminal command execution over `terminalExec` capability.
   - `POST /api/v1/tasks` for sync/async/auto task submission.
   - `GET /api/v1/tasks/:task_id` for task status and result lookup.
   - `POST /api/v1/tasks/:task_id/cancel` for best-effort task cancellation.
-  - request header: `X-Onlyboxes-Token: <token>` (must be in whitelist).
+  - request header: `Authorization: Bearer <access-token>` (must be in whitelist).
   - owner isolation is account-scoped: token resolves to `account_id`, and task/session ownership uses `account_id`.
   - task visibility: task lookup/cancel is owner-scoped by account; same-account tokens can access shared tasks, cross-account access returns `404`.
   - task idempotency: `request_id` de-duplication is scoped per account.
 - MCP Streamable HTTP API (token whitelist required):
   - `POST /mcp` for JSON-RPC requests over Streamable HTTP transport.
-  - request header: `X-Onlyboxes-Token: <token>` (must be in whitelist).
+  - request header: `Authorization: Bearer <access-token>` (must be in whitelist).
   - if whitelist is empty (no tokens configured in dashboard), all `/mcp` requests are rejected with `401`.
   - `GET /mcp` is intentionally unsupported and returns `405` with `Allow: POST`.
   - stream behavior is JSON response only (`application/json`), no SSE streaming channel.
@@ -69,7 +70,8 @@ The console service hosts:
   - token management (requires dashboard auth):
     - `GET /api/v1/console/tokens` list current account token metadata (`id`, `name`, masked token).
     - `POST /api/v1/console/tokens` create token bound to current account (manual token or auto-generated, plaintext returned only in create response).
-    - `GET /api/v1/console/tokens/:token_id/value` returns `410 Gone` (token plaintext is no longer retrievable after creation).
+    - `GET /api/v1/console/tokens/:token_id/value` always returns `410 Gone`.
+    - token plaintext is delivered in `POST /api/v1/console/tokens` response only.
     - `DELETE /api/v1/console/tokens/:token_id` delete token (current account only, cross-account returns `404`).
 
 Security warning (high risk):
@@ -132,18 +134,18 @@ MCP minimal call sequence (initialize + tools/list + tools/call):
 curl -X POST "http://127.0.0.1:8089/mcp" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -H "X-Onlyboxes-Token: <trusted_token>" \
+  -H "Authorization: Bearer <access-token>" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"manual-client","version":"0.1.0"}}}'
 
 curl -X POST "http://127.0.0.1:8089/mcp" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -H "X-Onlyboxes-Token: <trusted_token>" \
+  -H "Authorization: Bearer <access-token>" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 
 curl -X POST "http://127.0.0.1:8089/mcp" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -H "X-Onlyboxes-Token: <trusted_token>" \
+  -H "Authorization: Bearer <access-token>" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"pythonExec","arguments":{"code":"print(1)"}}}'
 ```

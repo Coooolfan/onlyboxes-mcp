@@ -31,7 +31,7 @@ func TestMCPAuthRequireTokenRejectsMissingHeader(t *testing.T) {
 	}
 }
 
-func TestMCPAuthRequireTokenRejectsOldHeader(t *testing.T) {
+func TestMCPAuthRequireTokenRejectsLegacyTokenHeader(t *testing.T) {
 	auth := newBareTestMCPAuth()
 	token := "token-a"
 	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
@@ -43,7 +43,49 @@ func TestMCPAuthRequireTokenRejectsOldHeader(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
-	req.Header.Set("X-Onlyboxes-MCP-Token", "token-a")
+	req.Header.Set("X-Onlyboxes-Token", "token-a")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMCPAuthRequireTokenRejectsNonBearerAuthorization(t *testing.T) {
+	auth := newBareTestMCPAuth()
+	token := "token-a"
+	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+	router := gin.New()
+	router.GET("/mcp", auth.RequireToken(), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	req.Header.Set(trustedTokenHeader, "Basic token-a")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMCPAuthRequireTokenRejectsBearerWithoutToken(t *testing.T) {
+	auth := newBareTestMCPAuth()
+	token := "token-a"
+	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+	router := gin.New()
+	router.GET("/mcp", auth.RequireToken(), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+	req.Header.Set(trustedTokenHeader, "Bearer")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -64,7 +106,7 @@ func TestMCPAuthRequireTokenRejectsWrongToken(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
-	req.Header.Set(trustedTokenHeader, "token-b")
+	req.Header.Set(trustedTokenHeader, "Bearer token-b")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -91,7 +133,7 @@ func TestMCPAuthRequireTokenAllowsTrustedToken(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
-	req.Header.Set(trustedTokenHeader, "token-a")
+	req.Header.Set(trustedTokenHeader, "Bearer token-a")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -108,7 +150,7 @@ func TestMCPAuthRequireTokenRejectsWhenStoreIsEmpty(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
-	req.Header.Set(trustedTokenHeader, "token-a")
+	req.Header.Set(trustedTokenHeader, "Bearer token-a")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 

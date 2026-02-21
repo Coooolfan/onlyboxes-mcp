@@ -90,7 +90,7 @@ func setMCPTokenHeader(req *http.Request) {
 	if req == nil {
 		return
 	}
-	req.Header.Set(trustedTokenHeader, testMCPToken)
+	req.Header.Set(trustedTokenHeader, "Bearer "+testMCPToken)
 }
 
 func seedTestAccount(queries *sqlc.Queries, accountID string, username string, password string, isAdmin bool) {

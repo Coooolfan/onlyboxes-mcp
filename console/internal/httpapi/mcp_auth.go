@@ -19,7 +19,10 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-const trustedTokenHeader = "X-Onlyboxes-Token"
+const (
+	trustedTokenHeader = "Authorization"
+	bearerTokenScheme  = "Bearer"
+)
 
 const (
 	maxTrustedTokenNameRunes = 64
@@ -112,8 +115,8 @@ func NewMCPAuthWithPersistence(db *persistence.DB) *MCPAuth {
 
 func (a *MCPAuth) RequireToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := strings.TrimSpace(c.GetHeader(trustedTokenHeader))
-		if token == "" || a == nil || a.hasher == nil {
+		token, ok := parseBearerToken(c.GetHeader(trustedTokenHeader))
+		if !ok || a == nil || a.hasher == nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or missing token"})
 			c.Abort()
 			return
@@ -127,6 +130,25 @@ func (a *MCPAuth) RequireToken() gin.HandlerFunc {
 		setRequestOwnerID(c, strings.TrimSpace(record.AccountID))
 		c.Next()
 	}
+}
+
+func parseBearerToken(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", false
+	}
+	parts := strings.Fields(trimmed)
+	if len(parts) != 2 {
+		return "", false
+	}
+	if !strings.EqualFold(parts[0], bearerTokenScheme) {
+		return "", false
+	}
+	token := strings.TrimSpace(parts[1])
+	if token == "" {
+		return "", false
+	}
+	return token, true
 }
 
 func (a *MCPAuth) ListTokens(c *gin.Context) {

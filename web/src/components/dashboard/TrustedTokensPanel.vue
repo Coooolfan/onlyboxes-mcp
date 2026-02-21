@@ -64,7 +64,7 @@ const tokenUsageSnippets = computed<TokenUsageSnippet[]>(() => {
       ? window.location.origin
       : 'http://127.0.0.1:8089'
   const mcpURL = new URL('/mcp', consoleOrigin).toString()
-  const tokenHeader = `X-Onlyboxes-Token: ${tokenValue}`
+  const tokenHeader = `Authorization: Bearer ${tokenValue}`
 
   return [
     {
@@ -89,7 +89,7 @@ const tokenUsageSnippets = computed<TokenUsageSnippet[]>(() => {
             onlyboxes: {
               url: mcpURL,
               headers: {
-                'X-Onlyboxes-Token': tokenValue,
+                Authorization: `Bearer ${tokenValue}`,
               },
             },
           },

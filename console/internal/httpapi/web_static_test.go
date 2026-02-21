@@ -67,7 +67,7 @@ func TestEmbeddedWebFallbackDoesNotInterceptMCP(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set(trustedTokenHeader, testMCPToken)
+	req.Header.Set(trustedTokenHeader, "Bearer "+testMCPToken)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 

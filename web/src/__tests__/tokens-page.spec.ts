@@ -95,6 +95,29 @@ describe('Tokens Page', () => {
         'http header',
         'mcp json',
       ])
+      const httpHeaderUsageItem = wrapper
+        .findAll('.token-usage-item')
+        .find((node) => node.text().includes('http header'))
+      expect(httpHeaderUsageItem).toBeTruthy()
+      const httpHeaderUsageToggle = httpHeaderUsageItem?.find('.token-usage-trigger')
+      expect(httpHeaderUsageToggle?.exists()).toBe(true)
+      await httpHeaderUsageToggle?.trigger('click')
+      await flushPromises()
+      const httpHeaderValue = httpHeaderUsageItem?.find('.token-usage-value').text() ?? ''
+      expect(httpHeaderValue).toContain('Authorization: Bearer obx_plaintext_once')
+      expect(httpHeaderValue).not.toContain('X-Onlyboxes-Token')
+
+      const mcpJSONUsageItem = wrapper
+        .findAll('.token-usage-item')
+        .find((node) => node.text().includes('mcp json'))
+      expect(mcpJSONUsageItem).toBeTruthy()
+      const mcpJSONUsageToggle = mcpJSONUsageItem?.find('.token-usage-trigger')
+      expect(mcpJSONUsageToggle?.exists()).toBe(true)
+      await mcpJSONUsageToggle?.trigger('click')
+      await flushPromises()
+      const mcpJSONValue = mcpJSONUsageItem?.find('.token-usage-value').text() ?? ''
+      expect(mcpJSONValue).toContain('"Authorization": "Bearer obx_plaintext_once"')
+      expect(mcpJSONValue).not.toContain('X-Onlyboxes-Token')
 
       const claudeUsageItem = wrapper
         .findAll('.token-usage-item')
@@ -115,9 +138,12 @@ describe('Tokens Page', () => {
       await claudeCopyButton?.trigger('click')
       await flushPromises()
       expect(writeText).toHaveBeenCalledTimes(1)
-      expect(String(writeText.mock.calls[0]?.[0] ?? '')).toContain(
+      const copiedClaudeCommand = String(writeText.mock.calls[0]?.[0] ?? '')
+      expect(copiedClaudeCommand).toContain(
         'claude mcp add --transport http onlyboxes',
       )
+      expect(copiedClaudeCommand).toContain('Authorization: Bearer obx_plaintext_once')
+      expect(copiedClaudeCommand).not.toContain('X-Onlyboxes-Token')
 
       const doneBtn = wrapper.findAll('button').find((button) => button.text() === 'Done')
       expect(doneBtn).toBeTruthy()
