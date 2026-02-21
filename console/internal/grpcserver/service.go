@@ -24,6 +24,8 @@ const (
 	commandOutboundBufferSize     = 128
 	defaultTaskRetentionWindow    = 10 * time.Minute
 	defaultCommandDispatchTimeout = 60 * time.Second
+	defaultTerminalRouteTTL       = 30 * time.Minute
+	terminalRoutePruneMinInterval = 1 * time.Minute
 )
 
 var ErrNoEchoWorker = errors.New("no online worker supports echo")
@@ -53,6 +55,12 @@ type RegistryService struct {
 	sessions   map[string]*activeSession
 	roundRobin uint64
 
+	terminalRoutesMu             sync.RWMutex
+	terminalSessionToNode        map[string]terminalSessionRoute
+	terminalNodeToSessionIDIndex map[string]map[string]struct{}
+	terminalRouteTTL             time.Duration
+	lastTerminalRoutePruneUnixMs atomic.Int64
+
 	tasksMu sync.RWMutex
 	// Active task runtime index:
 	// - tasks stores in-flight task runtime records by task_id.
@@ -76,20 +84,23 @@ func NewRegistryService(
 		credentialCopy[workerID] = secret
 	}
 	return &RegistryService{
-		store:                   store,
-		credentials:             credentialCopy,
-		credentialHashAlgo:      "legacy-plain",
-		heartbeatIntervalSec:    heartbeatIntervalSec,
-		offlineTTLSec:           offlineTTLSec,
-		nowFn:                   time.Now,
-		newSessionIDFn:          generateUUIDv4,
-		newCommandIDFn:          generateUUIDv4,
-		newTaskIDFn:             generateUUIDv4,
-		newTerminalSessionIDFn:  generateUUIDv4,
-		taskRetention:           defaultTaskRetentionWindow,
-		sessions:                make(map[string]*activeSession),
-		tasks:                   make(map[string]*taskRecord),
-		taskRequestReservations: make(map[string]struct{}),
+		store:                        store,
+		credentials:                  credentialCopy,
+		credentialHashAlgo:           "legacy-plain",
+		heartbeatIntervalSec:         heartbeatIntervalSec,
+		offlineTTLSec:                offlineTTLSec,
+		nowFn:                        time.Now,
+		newSessionIDFn:               generateUUIDv4,
+		newCommandIDFn:               generateUUIDv4,
+		newTaskIDFn:                  generateUUIDv4,
+		newTerminalSessionIDFn:       generateUUIDv4,
+		taskRetention:                defaultTaskRetentionWindow,
+		sessions:                     make(map[string]*activeSession),
+		terminalSessionToNode:        make(map[string]terminalSessionRoute),
+		terminalNodeToSessionIDIndex: make(map[string]map[string]struct{}),
+		terminalRouteTTL:             defaultTerminalRouteTTL,
+		tasks:                        make(map[string]*taskRecord),
+		taskRequestReservations:      make(map[string]struct{}),
 		criticalPersistenceFailureFn: func(err error) {
 			panic(err)
 		},

@@ -211,9 +211,13 @@ func (s *RegistryService) swapSession(session *activeSession) *activeSession {
 		return nil
 	}
 	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
 	replaced := s.sessions[session.nodeID]
 	s.sessions[session.nodeID] = session
+	// Release sessionsMu before touching terminal route tables to avoid lock
+	// inversion with dispatch paths that read terminal routes then sessions.
+	// This leaves a tiny window where an old route may be observed once.
+	s.sessionsMu.Unlock()
+	s.clearTerminalSessionRoutesByNode(session.nodeID)
 	return replaced
 }
 
@@ -235,7 +239,10 @@ func (s *RegistryService) removeSession(session *activeSession) {
 	}
 	delete(s.sessions, session.nodeID)
 	shouldClearStoreSession = true
+	// Keep the same lock order as swapSession: sessions first, then route tables.
+	// Clearing route mappings outside sessionsMu avoids cross-lock deadlocks.
 	s.sessionsMu.Unlock()
+	s.clearTerminalSessionRoutesByNode(session.nodeID)
 	if shouldClearStoreSession && s.store != nil {
 		if err := s.store.ClearSession(session.nodeID, session.sessionID); err != nil {
 			log.Printf(

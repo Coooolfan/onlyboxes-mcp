@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -495,6 +496,327 @@ func TestDispatchEchoRoundRobin(t *testing.T) {
 
 	if atomic.LoadInt32(&countA) != 1 || atomic.LoadInt32(&countB) != 1 {
 		t.Fatalf("expected round-robin distribution 1/1, got node-a=%d node-b=%d", countA, countB)
+	}
+}
+
+func TestSubmitTaskTerminalSessionReusedOnSameWorker(t *testing.T) {
+	svc := NewRegistryService(
+		registrytest.NewStore(t),
+		map[string]string{
+			"node-a": "secret-a",
+			"node-b": "secret-b",
+		},
+		5,
+		15,
+		60*time.Second,
+	)
+	client, cleanup := newBufClient(t, svc)
+	defer cleanup()
+
+	streamA, _, err := connectWorker(client, "node-a", "secret-a", "nonce-terminal-a", []string{"terminalexec"})
+	if err != nil {
+		t.Fatalf("connect worker A failed: %v", err)
+	}
+	streamB, _, err := connectWorker(client, "node-b", "secret-b", "nonce-terminal-b", []string{"terminalexec"})
+	if err != nil {
+		t.Fatalf("connect worker B failed: %v", err)
+	}
+
+	go terminalExecResponder(streamA, "worker-a")
+	go terminalExecResponder(streamB, "worker-b")
+
+	type terminalResult struct {
+		SessionID string `json:"session_id"`
+		Stdout    string `json:"stdout"`
+	}
+
+	submitTerminal := func(sessionID string) (terminalResult, error) {
+		input := `{"command":"uname -a"}`
+		if strings.TrimSpace(sessionID) != "" {
+			input = fmt.Sprintf(`{"command":"uname -a","session_id":"%s"}`, sessionID)
+		}
+		result, submitErr := svc.SubmitTask(context.Background(), SubmitTaskRequest{
+			Capability: "terminalExec",
+			InputJSON:  []byte(input),
+			Mode:       TaskModeSync,
+			Timeout:    2 * time.Second,
+			OwnerID:    "owner-a",
+		})
+		if submitErr != nil {
+			return terminalResult{}, submitErr
+		}
+		if result.Task.Status != TaskStatusSucceeded {
+			return terminalResult{}, fmt.Errorf("unexpected task status: %s", result.Task.Status)
+		}
+		output := terminalResult{}
+		if err := json.Unmarshal(result.Task.ResultJSON, &output); err != nil {
+			return terminalResult{}, err
+		}
+		return output, nil
+	}
+
+	first, err := submitTerminal("")
+	if err != nil {
+		t.Fatalf("first terminal submit failed: %v", err)
+	}
+	if strings.TrimSpace(first.SessionID) == "" {
+		t.Fatalf("expected non-empty session_id in first result")
+	}
+	if !strings.Contains(first.Stdout, "worker-a") && !strings.Contains(first.Stdout, "worker-b") {
+		t.Fatalf("expected worker marker in stdout, got %q", first.Stdout)
+	}
+
+	for i := 0; i < 3; i++ {
+		next, submitErr := submitTerminal(first.SessionID)
+		if submitErr != nil {
+			t.Fatalf("reuse submit #%d failed: %v", i+2, submitErr)
+		}
+		if next.SessionID != first.SessionID {
+			t.Fatalf("expected session_id %q, got %q", first.SessionID, next.SessionID)
+		}
+		if next.Stdout != first.Stdout {
+			t.Fatalf("expected stable stdout %q, got %q", first.Stdout, next.Stdout)
+		}
+	}
+}
+
+func TestSubmitTaskTerminalConcurrentFirstReuseSticksToOneWorker(t *testing.T) {
+	svc := NewRegistryService(
+		registrytest.NewStore(t),
+		map[string]string{
+			"node-a": "secret-a",
+			"node-b": "secret-b",
+		},
+		5,
+		15,
+		60*time.Second,
+	)
+	client, cleanup := newBufClient(t, svc)
+	defer cleanup()
+
+	streamA, _, err := connectWorker(client, "node-a", "secret-a", "nonce-terminal-concurrent-a", []string{"terminalexec"})
+	if err != nil {
+		t.Fatalf("connect worker A failed: %v", err)
+	}
+	streamB, _, err := connectWorker(client, "node-b", "secret-b", "nonce-terminal-concurrent-b", []string{"terminalexec"})
+	if err != nil {
+		t.Fatalf("connect worker B failed: %v", err)
+	}
+
+	go delayedTerminalExecResponder(streamA, "worker-a", 200*time.Millisecond)
+	go delayedTerminalExecResponder(streamB, "worker-b", 200*time.Millisecond)
+
+	type terminalResult struct {
+		SessionID string `json:"session_id"`
+		Stdout    string `json:"stdout"`
+	}
+	submitTerminal := func(sessionID string) (terminalResult, error) {
+		input := fmt.Sprintf(`{"command":"uname -a","session_id":"%s","create_if_missing":true}`, sessionID)
+		result, submitErr := svc.SubmitTask(context.Background(), SubmitTaskRequest{
+			Capability: "terminalExec",
+			InputJSON:  []byte(input),
+			Mode:       TaskModeSync,
+			Timeout:    2 * time.Second,
+			OwnerID:    "owner-a",
+		})
+		if submitErr != nil {
+			return terminalResult{}, submitErr
+		}
+		if result.Task.Status != TaskStatusSucceeded {
+			return terminalResult{}, fmt.Errorf("unexpected task status: %s", result.Task.Status)
+		}
+		output := terminalResult{}
+		if err := json.Unmarshal(result.Task.ResultJSON, &output); err != nil {
+			return terminalResult{}, err
+		}
+		return output, nil
+	}
+
+	for round := 0; round < 5; round++ {
+		sessionID := fmt.Sprintf("session-concurrent-%d", round+1)
+		start := make(chan struct{})
+		type callResult struct {
+			result terminalResult
+			err    error
+		}
+		callResults := make(chan callResult, 2)
+		for i := 0; i < 2; i++ {
+			go func() {
+				<-start
+				result, submitErr := submitTerminal(sessionID)
+				callResults <- callResult{result: result, err: submitErr}
+			}()
+		}
+		close(start)
+
+		first := callResult{}
+		second := callResult{}
+		for i := 0; i < 2; i++ {
+			select {
+			case result := <-callResults:
+				if i == 0 {
+					first = result
+				} else {
+					second = result
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatalf("timed out waiting for concurrent submit result #%d in round %d", i+1, round+1)
+			}
+		}
+
+		if first.err != nil {
+			t.Fatalf("first concurrent submit failed in round %d: %v", round+1, first.err)
+		}
+		if second.err != nil {
+			t.Fatalf("second concurrent submit failed in round %d: %v", round+1, second.err)
+		}
+		if first.result.SessionID != sessionID || second.result.SessionID != sessionID {
+			t.Fatalf("expected both results to keep session_id=%q in round %d, got %q and %q", sessionID, round+1, first.result.SessionID, second.result.SessionID)
+		}
+		if first.result.Stdout != second.result.Stdout {
+			t.Fatalf("expected same worker marker for concurrent first reuse in round %d, got %q and %q", round+1, first.result.Stdout, second.result.Stdout)
+		}
+	}
+}
+
+func TestDispatchCommandTerminalRouteRollbackWhenEnqueueFails(t *testing.T) {
+	svc := NewRegistryService(registrytest.NewStore(t), nil, 5, 15, 60*time.Second)
+	now := time.Unix(1_700_000_000, 0)
+	svc.nowFn = func() time.Time {
+		return now
+	}
+
+	hello := &registryv1.ConnectHello{
+		NodeId:       "node-1",
+		Capabilities: []*registryv1.CapabilityDeclaration{{Name: taskCapabilityTerminalExec}},
+	}
+	if err := svc.store.Upsert(hello, "worker-session-1", now); err != nil {
+		t.Fatalf("seed store upsert failed: %v", err)
+	}
+	session := newActiveSession("node-1", "worker-session-1", hello)
+	svc.swapSession(session)
+
+	for i := 0; i < commandOutboundBufferSize; i++ {
+		if err := session.enqueueCommand(context.Background(), &registryv1.ConnectResponse{}); err != nil {
+			t.Fatalf("failed to preload command queue at %d: %v", i, err)
+		}
+	}
+
+	payloadJSON, err := json.Marshal(terminalExecScopedPayload{
+		Command:         "uname -a",
+		SessionID:       "session-rollback",
+		CreateIfMissing: true,
+	})
+	if err != nil {
+		t.Fatalf("marshal payload failed: %v", err)
+	}
+
+	_, dispatchErr := svc.dispatchCommand(context.Background(), taskCapabilityTerminalExec, payloadJSON, 30*time.Millisecond, nil)
+	if !errors.Is(dispatchErr, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded, got %v", dispatchErr)
+	}
+	if _, ok := svc.touchTerminalSessionRoute("session-rollback", now.Add(time.Second)); ok {
+		t.Fatalf("expected route to be rolled back after enqueue failure")
+	}
+}
+
+func TestDispatchCommandTerminalSessionNotFoundClearsRoute(t *testing.T) {
+	svc := NewRegistryService(registrytest.NewStore(t), nil, 5, 15, 60*time.Second)
+	now := time.Unix(1_700_000_200, 0)
+	svc.nowFn = func() time.Time {
+		return now
+	}
+
+	hello := &registryv1.ConnectHello{
+		NodeId:       "node-1",
+		Capabilities: []*registryv1.CapabilityDeclaration{{Name: taskCapabilityTerminalExec}},
+	}
+	if err := svc.store.Upsert(hello, "worker-session-1", now); err != nil {
+		t.Fatalf("seed store upsert failed: %v", err)
+	}
+	session := newActiveSession("node-1", "worker-session-1", hello)
+	svc.swapSession(session)
+	svc.bindTerminalSessionRoute("session-missing", "node-1", now)
+
+	go func() {
+		response := <-session.commandOutbound
+		dispatch := response.GetCommandDispatch()
+		if dispatch == nil {
+			return
+		}
+		session.resolvePending(&registryv1.CommandResult{
+			CommandId: dispatch.GetCommandId(),
+			Error: &registryv1.CommandError{
+				Code:    terminalSessionNotFoundCode,
+				Message: "session not found",
+			},
+			CompletedUnixMs: now.UnixMilli(),
+		})
+	}()
+
+	payloadJSON, err := json.Marshal(terminalExecScopedPayload{
+		Command:   "uname -a",
+		SessionID: "session-missing",
+	})
+	if err != nil {
+		t.Fatalf("marshal payload failed: %v", err)
+	}
+
+	outcome, dispatchErr := svc.dispatchCommand(context.Background(), taskCapabilityTerminalExec, payloadJSON, 2*time.Second, nil)
+	if dispatchErr != nil {
+		t.Fatalf("dispatch command failed: %v", dispatchErr)
+	}
+	var commandErr *CommandExecutionError
+	if !errors.As(outcome.err, &commandErr) {
+		t.Fatalf("expected CommandExecutionError, got %v", outcome.err)
+	}
+	if commandErr.Code != terminalSessionNotFoundCode {
+		t.Fatalf("expected %q code, got %q", terminalSessionNotFoundCode, commandErr.Code)
+	}
+	if _, ok := svc.touchTerminalSessionRoute("session-missing", now.Add(time.Second)); ok {
+		t.Fatalf("expected route to be cleared after session_not_found")
+	}
+}
+
+func TestPruneExpiredTerminalSessionRoutes(t *testing.T) {
+	svc := NewRegistryService(registrytest.NewStore(t), nil, 5, 15, 60*time.Second)
+	svc.terminalRouteTTL = 1000 * time.Millisecond
+	base := time.Unix(1_700_000_500, 0)
+
+	svc.bindTerminalSessionRoute("session-expired", "node-1", base)
+	svc.bindTerminalSessionRoute("session-fresh", "node-1", base.Add(900*time.Millisecond))
+
+	removed := svc.pruneExpiredTerminalSessionRoutes(base.Add(1500 * time.Millisecond))
+	if removed != 1 {
+		t.Fatalf("expected one expired route removed, got %d", removed)
+	}
+	if _, ok := svc.touchTerminalSessionRoute("session-expired", base.Add(2*time.Second)); ok {
+		t.Fatalf("expected expired route to be pruned")
+	}
+	nodeID, ok := svc.touchTerminalSessionRoute("session-fresh", base.Add(2*time.Second))
+	if !ok || nodeID != "node-1" {
+		t.Fatalf("expected fresh route to remain on node-1, got node=%q ok=%v", nodeID, ok)
+	}
+}
+
+func TestPickSessionForNodeAndCapabilityReturnsNoWorkerCapacityWhenFull(t *testing.T) {
+	svc := NewRegistryService(registrytest.NewStore(t), nil, 5, 15, 60*time.Second)
+	hello := &registryv1.ConnectHello{
+		NodeId: "node-1",
+		Capabilities: []*registryv1.CapabilityDeclaration{
+			{Name: "echo", MaxInflight: 1},
+		},
+	}
+	session := newActiveSession("node-1", "session-1", hello)
+	svc.swapSession(session)
+
+	if !session.tryAcquireCapability("echo") {
+		t.Fatalf("expected first capability acquire to succeed")
+	}
+	defer session.releaseCapability("echo")
+
+	if _, err := svc.pickSessionForNodeAndCapability("node-1", "echo"); !errors.Is(err, ErrNoWorkerCapacity) {
+		t.Fatalf("expected ErrNoWorkerCapacity, got %v", err)
 	}
 }
 
@@ -1190,4 +1512,151 @@ func payloadEchoResponder(stream grpc.BidiStreamingClient[registryv1.ConnectRequ
 			},
 		})
 	}
+}
+
+func terminalExecResponder(stream grpc.BidiStreamingClient[registryv1.ConnectRequest, registryv1.ConnectResponse], workerMarker string) {
+	sessions := make(map[string]string)
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			return
+		}
+		dispatch := resp.GetCommandDispatch()
+		if dispatch == nil || dispatch.GetCapability() != taskCapabilityTerminalExec {
+			continue
+		}
+
+		payload := terminalExecScopedPayload{}
+		if err := json.Unmarshal(dispatch.GetPayloadJson(), &payload); err != nil {
+			sendTerminalExecError(stream, dispatch.GetCommandId(), "invalid_payload", "invalid terminal payload")
+			continue
+		}
+		sessionID := strings.TrimSpace(payload.SessionID)
+		if sessionID == "" {
+			sendTerminalExecError(stream, dispatch.GetCommandId(), "invalid_payload", "session_id is required")
+			continue
+		}
+
+		stdout, exists := sessions[sessionID]
+		created := false
+		if !exists {
+			if !payload.CreateIfMissing {
+				sendTerminalExecError(stream, dispatch.GetCommandId(), "session_not_found", "session not found")
+				continue
+			}
+			stdout = "Linux " + workerMarker
+			sessions[sessionID] = stdout
+			created = true
+		}
+
+		resultPayload, err := marshalTerminalExecSuccessPayload(sessionID, created, stdout)
+		if err != nil {
+			sendTerminalExecError(stream, dispatch.GetCommandId(), "invalid_payload", "failed to encode result")
+			continue
+		}
+
+		_ = stream.Send(&registryv1.ConnectRequest{
+			Payload: &registryv1.ConnectRequest_CommandResult{
+				CommandResult: &registryv1.CommandResult{
+					CommandId:       dispatch.GetCommandId(),
+					PayloadJson:     resultPayload,
+					CompletedUnixMs: time.Now().UnixMilli(),
+				},
+			},
+		})
+	}
+}
+
+func delayedTerminalExecResponder(
+	stream grpc.BidiStreamingClient[registryv1.ConnectRequest, registryv1.ConnectResponse],
+	workerMarker string,
+	delay time.Duration,
+) {
+	sessions := make(map[string]string)
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			return
+		}
+		dispatch := resp.GetCommandDispatch()
+		if dispatch == nil || dispatch.GetCapability() != taskCapabilityTerminalExec {
+			continue
+		}
+
+		payload := terminalExecScopedPayload{}
+		if err := json.Unmarshal(dispatch.GetPayloadJson(), &payload); err != nil {
+			sendTerminalExecError(stream, dispatch.GetCommandId(), "invalid_payload", "invalid terminal payload")
+			continue
+		}
+		sessionID := strings.TrimSpace(payload.SessionID)
+		if sessionID == "" {
+			sendTerminalExecError(stream, dispatch.GetCommandId(), "invalid_payload", "session_id is required")
+			continue
+		}
+
+		stdout, exists := sessions[sessionID]
+		created := false
+		if !exists {
+			if !payload.CreateIfMissing {
+				sendTerminalExecError(stream, dispatch.GetCommandId(), "session_not_found", "session not found")
+				continue
+			}
+			stdout = "Linux " + workerMarker
+			sessions[sessionID] = stdout
+			created = true
+		}
+
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+
+		resultPayload, err := marshalTerminalExecSuccessPayload(sessionID, created, stdout)
+		if err != nil {
+			sendTerminalExecError(stream, dispatch.GetCommandId(), "invalid_payload", "failed to encode result")
+			continue
+		}
+
+		_ = stream.Send(&registryv1.ConnectRequest{
+			Payload: &registryv1.ConnectRequest_CommandResult{
+				CommandResult: &registryv1.CommandResult{
+					CommandId:       dispatch.GetCommandId(),
+					PayloadJson:     resultPayload,
+					CompletedUnixMs: time.Now().UnixMilli(),
+				},
+			},
+		})
+	}
+}
+
+func marshalTerminalExecSuccessPayload(sessionID string, created bool, stdout string) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"session_id":            sessionID,
+		"created":               created,
+		"stdout":                stdout,
+		"stderr":                "",
+		"exit_code":             0,
+		"stdout_truncated":      false,
+		"stderr_truncated":      false,
+		"lease_expires_unix_ms": time.Now().Add(time.Minute).UnixMilli(),
+	})
+}
+
+func sendTerminalExecError(
+	stream grpc.BidiStreamingClient[registryv1.ConnectRequest, registryv1.ConnectResponse],
+	commandID string,
+	code string,
+	message string,
+) {
+	_ = stream.Send(&registryv1.ConnectRequest{
+		Payload: &registryv1.ConnectRequest_CommandResult{
+			CommandResult: &registryv1.CommandResult{
+				CommandId: commandID,
+				Error: &registryv1.CommandError{
+					Code:    code,
+					Message: message,
+				},
+				CompletedUnixMs: time.Now().UnixMilli(),
+			},
+		},
+	})
 }
