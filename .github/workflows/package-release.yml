@@ -20,8 +20,6 @@ jobs:
     outputs:
       version_raw: ${{ steps.version.outputs.version_raw }}
       version_safe: ${{ steps.version.outputs.version_safe }}
-      console_bin: ${{ steps.version.outputs.console_bin }}
-      worker_bin: ${{ steps.version.outputs.worker_bin }}
     steps:
       - name: Resolve version
         id: version
@@ -44,17 +42,30 @@ jobs:
             exit 1
           fi
 
-          console_bin="onlyboxes-console_${version_safe}_linux_amd64"
-          worker_bin="onlyboxes-worker-docker_${version_safe}_linux_amd64"
-
           echo "version_raw=${version_raw}" >> "${GITHUB_OUTPUT}"
           echo "version_safe=${version_safe}" >> "${GITHUB_OUTPUT}"
-          echo "console_bin=${console_bin}" >> "${GITHUB_OUTPUT}"
-          echo "worker_bin=${worker_bin}" >> "${GITHUB_OUTPUT}"
 
   build-console:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     needs: resolve-version
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x64
+            goarch: amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            goarch: arm64
+    env:
+      VERSION_RAW: ${{ needs.resolve-version.outputs.version_raw }}
+      VERSION_SAFE: ${{ needs.resolve-version.outputs.version_safe }}
+      GOARCH: ${{ matrix.goarch }}
+      CONSOLE_BIN: onlyboxes-console_${{ needs.resolve-version.outputs.version_safe }}_linux_${{ matrix.goarch }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -70,14 +81,12 @@ jobs:
         run: corepack enable
 
       - name: Build web
-        shell: bash
         run: |
           set -euo pipefail
           yarn --cwd web install --immutable
-          VITE_CONSOLE_VERSION="${{ needs.resolve-version.outputs.version_raw }}" yarn --cwd web build
+          VITE_CONSOLE_VERSION="${VERSION_RAW}" yarn --cwd web build
 
       - name: Sync web dist into console embedded assets
-        shell: bash
         run: |
           set -euo pipefail
           rm -rf console/internal/httpapi/web_dist
@@ -90,48 +99,87 @@ jobs:
           go-version: "1.24.x"
           cache-dependency-path: console/go.sum
 
-      - name: Build console linux amd64 binary
-        shell: bash
+      - name: Build console binary
         run: |
           set -euo pipefail
           mkdir -p build
           (
             cd console
-            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-              -ldflags "-X github.com/onlyboxes/onlyboxes/console/internal/buildinfo.Version=${{ needs.resolve-version.outputs.version_raw }}" \
-              -o "../build/${{ needs.resolve-version.outputs.console_bin }}" \
+            CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" go build -trimpath \
+              -ldflags "-X github.com/onlyboxes/onlyboxes/console/internal/buildinfo.Version=${VERSION_RAW}" \
+              -o "../build/${CONSOLE_BIN}" \
               ./cmd/console
           )
 
-      - name: Validate console ELF architecture
-        shell: bash
+      - name: Validate console binary architecture
         run: |
           set -euo pipefail
-          console_info="$(file "build/${{ needs.resolve-version.outputs.console_bin }}")"
+          console_info="$(file "build/${CONSOLE_BIN}")"
           echo "${console_info}"
-          grep -Eq "ELF 64-bit.*x86-64" <<< "${console_info}"
+          case "${GOARCH}" in
+            amd64)
+              grep -Eq "ELF 64-bit.*x86-64" <<< "${console_info}"
+              ;;
+            arm64)
+              grep -Eq "ELF 64-bit.*ARM aarch64" <<< "${console_info}"
+              ;;
+            *)
+              echo "unsupported GOARCH: ${GOARCH}" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Upload console workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onlyboxes-console-linux-amd64-${{ needs.resolve-version.outputs.version_safe }}
-          path: build/${{ needs.resolve-version.outputs.console_bin }}
+          name: onlyboxes-console-linux-${{ matrix.arch }}-${{ env.VERSION_SAFE }}
+          path: build/${{ env.CONSOLE_BIN }}
           if-no-files-found: error
 
       - name: Upload console release asset
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -euo pipefail
-          gh release upload "${{ needs.resolve-version.outputs.version_raw }}" \
-            "build/${{ needs.resolve-version.outputs.console_bin }}" \
-            --clobber
+          gh release upload "${VERSION_RAW}" "build/${CONSOLE_BIN}" --clobber
 
   build-worker:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     needs: resolve-version
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x64
+            os_name: linux
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            os_name: linux
+            goos: linux
+            goarch: arm64
+          - os: macos-15-intel
+            arch: x64
+            os_name: macos
+            goos: darwin
+            goarch: amd64
+          - os: macos-15
+            arch: arm64
+            os_name: macos
+            goos: darwin
+            goarch: arm64
+    env:
+      VERSION_RAW: ${{ needs.resolve-version.outputs.version_raw }}
+      VERSION_SAFE: ${{ needs.resolve-version.outputs.version_safe }}
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      WORKER_BIN: onlyboxes-worker-docker_${{ needs.resolve-version.outputs.version_safe }}_${{ matrix.os_name }}_${{ matrix.goarch }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -144,61 +192,84 @@ jobs:
           go-version: "1.24.x"
           cache-dependency-path: worker/worker-docker/go.sum
 
-      - name: Build worker linux amd64 binary
-        shell: bash
+      - name: Build worker binary
         run: |
           set -euo pipefail
           mkdir -p build
           (
             cd worker/worker-docker
-            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-              -ldflags "-X github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/buildinfo.Version=${{ needs.resolve-version.outputs.version_raw }}" \
-              -o "../../build/${{ needs.resolve-version.outputs.worker_bin }}" \
+            CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -trimpath \
+              -ldflags "-X github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/buildinfo.Version=${VERSION_RAW}" \
+              -o "../../build/${WORKER_BIN}" \
               ./cmd/worker-docker
           )
 
-      - name: Validate worker ELF architecture
-        shell: bash
+      - name: Validate worker binary architecture
         run: |
           set -euo pipefail
-          worker_info="$(file "build/${{ needs.resolve-version.outputs.worker_bin }}")"
+          worker_info="$(file "build/${WORKER_BIN}")"
           echo "${worker_info}"
-          grep -Eq "ELF 64-bit.*x86-64" <<< "${worker_info}"
+          case "${GOOS}/${GOARCH}" in
+            linux/amd64)
+              grep -Eq "ELF 64-bit.*x86-64" <<< "${worker_info}"
+              ;;
+            linux/arm64)
+              grep -Eq "ELF 64-bit.*ARM aarch64" <<< "${worker_info}"
+              ;;
+            darwin/amd64)
+              grep -Eq "Mach-O 64-bit executable x86_64" <<< "${worker_info}"
+              ;;
+            darwin/arm64)
+              grep -Eq "Mach-O 64-bit executable arm64" <<< "${worker_info}"
+              ;;
+            *)
+              echo "unsupported target: ${GOOS}/${GOARCH}" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Upload worker workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onlyboxes-worker-docker-linux-amd64-${{ needs.resolve-version.outputs.version_safe }}
-          path: build/${{ needs.resolve-version.outputs.worker_bin }}
+          name: onlyboxes-worker-docker-${{ matrix.os_name }}-${{ matrix.arch }}-${{ env.VERSION_SAFE }}
+          path: build/${{ env.WORKER_BIN }}
           if-no-files-found: error
 
       - name: Upload worker release asset
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -euo pipefail
-          gh release upload "${{ needs.resolve-version.outputs.version_raw }}" \
-            "build/${{ needs.resolve-version.outputs.worker_bin }}" \
-            --clobber
+          gh release upload "${VERSION_RAW}" "build/${WORKER_BIN}" --clobber
 
   docker-console:
     runs-on: ubuntu-latest
     needs:
       - resolve-version
       - build-console
+    env:
+      VERSION_SAFE: ${{ needs.resolve-version.outputs.version_safe }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
 
-      - name: Download console binary artifact
+      - name: Download console linux x64 binary artifact
         uses: actions/download-artifact@v4
         with:
-          name: onlyboxes-console-linux-amd64-${{ needs.resolve-version.outputs.version_safe }}
-          path: build
+          name: onlyboxes-console-linux-x64-${{ env.VERSION_SAFE }}
+          path: build/console-linux-x64
+
+      - name: Download console linux arm64 binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: onlyboxes-console-linux-arm64-${{ env.VERSION_SAFE }}
+          path: build/console-linux-arm64
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -211,16 +282,13 @@ jobs:
 
       - name: Resolve Docker tags
         id: docker_tags
-        shell: bash
         env:
           VERSION_SAFE: ${{ needs.resolve-version.outputs.version_safe }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           set -euo pipefail
-          image_repo="${DOCKERHUB_USERNAME}/onlyboxes"
+          image_repo="coolfan1024/onlyboxes"
 
           console_tags="${image_repo}:${VERSION_SAFE}"
-
           if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
             console_tags+=$'\n'"${image_repo}:latest"
           fi
@@ -232,11 +300,11 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Prepare Docker build context
-        shell: bash
         run: |
           set -euo pipefail
           mkdir -p build/docker/console
-          cp "build/${{ needs.resolve-version.outputs.console_bin }}" "build/docker/console/onlyboxes-console"
+          cp "build/console-linux-x64/onlyboxes-console_${VERSION_SAFE}_linux_amd64" "build/docker/console/onlyboxes-console-amd64"
+          cp "build/console-linux-arm64/onlyboxes-console_${VERSION_SAFE}_linux_arm64" "build/docker/console/onlyboxes-console-arm64"
           cp docker/console.dockerfile "build/docker/console/Dockerfile"
 
       - name: Build and push console image
@@ -244,6 +312,6 @@ jobs:
         with:
           context: build/docker/console
           file: build/docker/console/Dockerfile
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.docker_tags.outputs.console_tags }}

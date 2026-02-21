@@ -172,14 +172,18 @@ curl -X POST "http://127.0.0.1:8089/mcp" \
 - `workflow_dispatch`：手动触发，必须传入 `version`，上传二进制 artifact，并推送 Docker 镜像版本标签（不推 `latest`）。
 - `release.published`：发布触发，自动构建并上传二进制到对应 GitHub Release，同时推送 Docker 镜像版本标签与 `latest` 标签。
 
-产物固定为 Linux amd64 两个可执行文件：
+产物按平台生成以下可执行文件：
 
 - `onlyboxes-console_<version>_linux_amd64`
+- `onlyboxes-console_<version>_linux_arm64`
 - `onlyboxes-worker-docker_<version>_linux_amd64`
+- `onlyboxes-worker-docker_<version>_linux_arm64`
+- `onlyboxes-worker-docker_<version>_macos_amd64`
+- `onlyboxes-worker-docker_<version>_macos_arm64`
 
 其中 `console` 二进制内嵌 `web` 前端静态资源，部署后可直接提供页面服务。
 
-Docker Hub 镜像仓库：`coolfan1024/onlyboxes`，仅推送 `console` 镜像，标签策略如下：
+Docker Hub 镜像仓库：`coolfan1024/onlyboxes`，仅推送 `console` 镜像（多架构 `linux/amd64`、`linux/arm64`），标签策略如下：
 
 - `<version>`：手动触发与 release 均推送
 - `latest`：仅 release 推送（不带前缀）
