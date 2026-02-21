@@ -73,7 +73,10 @@ function getInflight(nodeId: string, capName: string): InflightCapability | null
             <div class="node-main">{{ worker.node_name || worker.node_id }}</div>
             <div class="node-sub">{{ worker.node_id }}</div>
           </td>
-          <td>{{ worker.executor_kind || '--' }}</td>
+          <td>
+            <div class="runtime-main">{{ worker.executor_kind || '--' }}</div>
+            <div class="runtime-sub">version: {{ worker.version || '--' }}</div>
+          </td>
           <td>
             <div
               class="capabilities-list"
@@ -219,6 +222,17 @@ tr:hover {
 }
 
 .node-sub {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.runtime-main {
+  font-size: 14px;
+}
+
+.runtime-sub {
   margin-top: 4px;
   color: var(--text-secondary);
   font-family: 'JetBrains Mono', monospace;

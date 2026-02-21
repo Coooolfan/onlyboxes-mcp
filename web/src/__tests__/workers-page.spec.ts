@@ -54,6 +54,7 @@ describe('Workers Page', () => {
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const wrapper = await mountApp('/workers')
+    expect(wrapper.text()).toContain('version: v0.1.0')
 
     const logoutBtn = wrapper.findAll('button').find((button) => button.text() === 'Logout')
     expect(logoutBtn).toBeTruthy()

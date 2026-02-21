@@ -65,7 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           yarn --cwd web install --immutable
-          yarn --cwd web build
+          VITE_CONSOLE_VERSION="${{ steps.version.outputs.version_raw }}" yarn --cwd web build
 
       - name: Sync web dist into console embedded assets
         shell: bash
@@ -90,11 +90,17 @@ jobs:
           mkdir -p build
           (
             cd console
-            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "../build/${{ steps.version.outputs.console_bin }}" ./cmd/console
+            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+              -ldflags "-X github.com/onlyboxes/onlyboxes/console/internal/buildinfo.Version=${{ steps.version.outputs.version_raw }}" \
+              -o "../build/${{ steps.version.outputs.console_bin }}" \
+              ./cmd/console
           )
           (
             cd worker/worker-docker
-            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "../../build/${{ steps.version.outputs.worker_bin }}" ./cmd/worker-docker
+            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+              -ldflags "-X github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/buildinfo.Version=${{ steps.version.outputs.version_raw }}" \
+              -o "../../build/${{ steps.version.outputs.worker_bin }}" \
+              ./cmd/worker-docker
           )
 
       - name: Validate ELF architecture

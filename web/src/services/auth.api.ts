@@ -1,3 +1,4 @@
+import { defaultConsoleRepoURL, defaultConsoleVersion } from '@/constants/console'
 import { parseAPIError, request } from '@/services/http'
 import type { AccountProfile, ConsoleSessionPayload, RegisterAccountPayload } from '@/types/auth'
 
@@ -29,10 +30,14 @@ function parseAccountProfile(payload: unknown): AccountProfile {
 
 function parseSessionPayload(payload: unknown): ConsoleSessionPayload {
   const value = payload as Partial<ConsoleSessionPayload> | null
+  const consoleVersion = typeof value?.console_version === 'string' ? value.console_version.trim() : ''
+  const consoleRepoURL = typeof value?.console_repo_url === 'string' ? value.console_repo_url.trim() : ''
   return {
     authenticated: value?.authenticated === true,
     account: parseAccountProfile(value?.account),
     registration_enabled: value?.registration_enabled === true,
+    console_version: consoleVersion || defaultConsoleVersion,
+    console_repo_url: consoleRepoURL || defaultConsoleRepoURL,
   }
 }
 

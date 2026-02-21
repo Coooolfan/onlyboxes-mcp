@@ -35,18 +35,15 @@ func TestEmbeddedWebRootServesIndex(t *testing.T) {
 	}
 }
 
-func TestEmbeddedWebSPAFallbackServesIndex(t *testing.T) {
+func TestEmbeddedWebUnknownRouteReturnsNotFound(t *testing.T) {
 	router := newWebStaticTestRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/workers", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(strings.ToLower(rec.Body.String()), "<!doctype html") {
-		t.Fatalf("expected fallback index html body, got %q", rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

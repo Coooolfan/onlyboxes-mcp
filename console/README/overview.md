@@ -5,8 +5,8 @@ The console service hosts:
 - embedded web dashboard static hosting:
   - `GET /` serves embedded `web` frontend.
   - `GET /assets/*` serves bundled static assets.
-  - non-API `GET/HEAD` routes use SPA fallback (`index.html`).
-  - `/api/*` and `/mcp` are excluded from SPA fallback.
+  - unknown `GET/HEAD` routes return `404 Not Found`.
+  - `/api/*` and `/mcp` are reserved for backend handlers and are not served as frontend pages.
 - REST APIs for worker data (dashboard authentication + admin required):
   - `GET /api/v1/workers` for paginated worker listing.
   - `GET /api/v1/workers/stats` for aggregated worker status metrics.
@@ -63,9 +63,9 @@ The console service hosts:
       - non-format failures (session/file missing, busy, timeout, read failure) are returned as tool errors.
 - dashboard authentication APIs:
   - `POST /api/v1/console/login` with `{"username":"...","password":"..."}`.
-  - login response includes `authenticated`, `account`, `registration_enabled`.
+  - login response includes `authenticated`, `account`, `registration_enabled`, `console_version`, `console_repo_url`.
   - `POST /api/v1/console/logout`.
-  - `GET /api/v1/console/session` returns current session account payload.
+  - `GET /api/v1/console/session` returns current session account payload with `console_version` and `console_repo_url`.
   - `POST /api/v1/console/register` creates non-admin account (admin-only, and only when `CONSOLE_ENABLE_REGISTRATION=true`).
   - token management (requires dashboard auth):
     - `GET /api/v1/console/tokens` list current account token metadata (`id`, `name`, masked token).

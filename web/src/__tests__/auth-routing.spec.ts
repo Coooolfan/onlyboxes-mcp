@@ -46,6 +46,10 @@ describe('Auth Routing', () => {
 
     expect(router.currentRoute.value.path).toBe('/workers')
     expect(wrapper.text()).toContain('Execution Node Control Panel')
+    expect(wrapper.text()).toContain('Console v0.1.0')
+    expect(wrapper.find('.console-footer-link').attributes('href')).toBe(
+      'https://github.com/Coooolfan/onlyboxes',
+    )
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/v1/console/session')).toBe(
       true,
     )

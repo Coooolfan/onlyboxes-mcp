@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/onlyboxes/onlyboxes/console/internal/buildinfo"
 	"github.com/onlyboxes/onlyboxes/console/internal/persistence"
 	"github.com/onlyboxes/onlyboxes/console/internal/testutil/registrytest"
 )
@@ -280,6 +281,12 @@ func TestConsoleAuthSessionEndpoint(t *testing.T) {
 	}
 	if !payload.RegistrationEnabled {
 		t.Fatalf("expected registration_enabled=true")
+	}
+	if payload.ConsoleVersion != consoleVersion() {
+		t.Fatalf("expected console_version=%q, got %q", consoleVersion(), payload.ConsoleVersion)
+	}
+	if payload.ConsoleRepoURL != buildinfo.RepoURL {
+		t.Fatalf("expected console_repo_url=%q, got %q", buildinfo.RepoURL, payload.ConsoleRepoURL)
 	}
 }
 

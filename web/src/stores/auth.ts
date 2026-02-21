@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 
+import { defaultConsoleRepoURL, defaultConsoleVersion } from '@/constants/console'
 import {
   isInvalidCredentialsError,
   loginAPI,
@@ -16,6 +17,8 @@ interface AuthStoreState {
   currentAccount: AccountProfile | null
   isAdmin: boolean
   registrationEnabled: boolean
+  consoleVersion: string
+  consoleRepoURL: string
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -26,6 +29,8 @@ export const useAuthStore = defineStore('auth', {
     currentAccount: null,
     isAdmin: false,
     registrationEnabled: false,
+    consoleVersion: defaultConsoleVersion,
+    consoleRepoURL: defaultConsoleRepoURL,
   }),
   getters: {
     isAuthenticated: (state) => state.authState === 'authenticated',
@@ -37,6 +42,8 @@ export const useAuthStore = defineStore('auth', {
       this.currentAccount = payload.account
       this.isAdmin = payload.account.is_admin
       this.registrationEnabled = payload.registration_enabled
+      this.consoleVersion = payload.console_version
+      this.consoleRepoURL = payload.console_repo_url
       this.bootstrapped = true
     },
 
@@ -44,6 +51,8 @@ export const useAuthStore = defineStore('auth', {
       this.currentAccount = null
       this.isAdmin = false
       this.registrationEnabled = false
+      this.consoleVersion = defaultConsoleVersion
+      this.consoleRepoURL = defaultConsoleRepoURL
       this.authState = 'unauthenticated'
       this.bootstrapped = true
     },

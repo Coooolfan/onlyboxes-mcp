@@ -12,6 +12,8 @@ export const adminSessionPayload = {
     is_admin: true,
   },
   registration_enabled: true,
+  console_version: 'v0.1.0',
+  console_repo_url: 'https://github.com/Coooolfan/onlyboxes',
 }
 
 export const memberSessionPayload = {
@@ -22,6 +24,8 @@ export const memberSessionPayload = {
     is_admin: false,
   },
   registration_enabled: false,
+  console_version: 'v0.1.0',
+  console_repo_url: 'https://github.com/Coooolfan/onlyboxes',
 }
 
 export const statsPayload = {

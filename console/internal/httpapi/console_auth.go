@@ -91,6 +91,8 @@ type accountSessionResponse struct {
 	Authenticated       bool           `json:"authenticated,omitempty"`
 	Account             SessionAccount `json:"account"`
 	RegistrationEnabled bool           `json:"registration_enabled"`
+	ConsoleVersion      string         `json:"console_version"`
+	ConsoleRepoURL      string         `json:"console_repo_url"`
 }
 
 type registerAccountResponse struct {

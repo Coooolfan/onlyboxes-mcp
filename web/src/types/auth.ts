@@ -10,6 +10,8 @@ export interface ConsoleSessionPayload {
   authenticated: boolean
   account: AccountProfile
   registration_enabled: boolean
+  console_version: string
+  console_repo_url: string
 }
 
 export interface RegisterAccountPayload {

@@ -15,6 +15,11 @@ Required identity:
 These values are returned by `console` when calling `POST /api/v1/workers` (startup command response).
 `WORKER_SECRET` is only returned once at creation time; if lost, delete and recreate the worker in dashboard/API.
 
+Version report:
+- worker registers `version` in `ConnectHello`.
+- default source is binary embedded build version (`dev` when not injected).
+- can be overridden with `WORKER_VERSION`.
+
 Capability behavior:
 - `worker-docker` hardcodes capability declarations to `echo`, `pythonExec`, `terminalExec`, and `terminalResource`.
 - each capability declaration includes `max_inflight=4`.

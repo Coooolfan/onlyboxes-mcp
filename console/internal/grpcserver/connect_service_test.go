@@ -35,7 +35,7 @@ func newBufClient(t *testing.T, svc registryv1.WorkerRegistryServiceServer) (reg
 	}
 
 	conn, err := grpc.NewClient(
-		"bufnet",
+		"passthrough:///bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)

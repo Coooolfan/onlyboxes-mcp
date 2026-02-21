@@ -38,6 +38,8 @@ func (a *ConsoleAuth) Login(c *gin.Context) {
 		Authenticated:       true,
 		Account:             sessionAccount,
 		RegistrationEnabled: a.registrationEnabled,
+		ConsoleVersion:      consoleVersion(),
+		ConsoleRepoURL:      consoleRepoURL(),
 	})
 }
 
@@ -50,6 +52,8 @@ func (a *ConsoleAuth) Session(c *gin.Context) {
 		Authenticated:       true,
 		Account:             account,
 		RegistrationEnabled: a.registrationEnabled,
+		ConsoleVersion:      consoleVersion(),
+		ConsoleRepoURL:      consoleRepoURL(),
 	})
 }
 

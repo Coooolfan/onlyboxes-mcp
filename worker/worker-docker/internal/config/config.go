@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/buildinfo"
 )
 
 const (
@@ -13,7 +15,6 @@ const (
 	defaultHeartbeatJitter   = 20
 	defaultCallTimeout       = 3
 	defaultExecutorKind      = "docker"
-	defaultWorkerVersion     = "dev"
 	defaultPythonExecImage   = "python:slim"
 	defaultTerminalExecImage = "coolfan1024/onlyboxes-default-worker:0.0.3"
 	defaultTerminalLeaseMin  = 60
@@ -56,6 +57,10 @@ func Load() Config {
 	terminalOutputLimitBytes := parsePositiveIntEnv("WORKER_TERMINAL_OUTPUT_LIMIT_BYTES", defaultTerminalOutputMax)
 
 	labelsCSV := os.Getenv("WORKER_LABELS")
+	defaultVersion := strings.TrimSpace(buildinfo.Version)
+	if defaultVersion == "" {
+		defaultVersion = "dev"
+	}
 
 	return Config{
 		ConsoleGRPCTarget:        getEnv("WORKER_CONSOLE_GRPC_TARGET", defaultConsoleTarget),
@@ -67,7 +72,7 @@ func Load() Config {
 		CallTimeout:              time.Duration(callTimeoutSec) * time.Second,
 		NodeName:                 os.Getenv("WORKER_NODE_NAME"),
 		ExecutorKind:             defaultExecutorKind,
-		Version:                  getEnv("WORKER_VERSION", defaultWorkerVersion),
+		Version:                  getEnv("WORKER_VERSION", defaultVersion),
 		PythonExecDockerImage:    getEnv("WORKER_PYTHON_EXEC_DOCKER_IMAGE", defaultPythonExecImage),
 		TerminalExecDockerImage:  getEnv("WORKER_TERMINAL_EXEC_DOCKER_IMAGE", defaultTerminalExecImage),
 		Labels:                   parseLabels(labelsCSV),

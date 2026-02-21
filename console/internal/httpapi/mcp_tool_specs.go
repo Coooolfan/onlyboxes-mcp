@@ -2,7 +2,6 @@ package httpapi
 
 const (
 	mcpServerName                  = "onlyboxes-console"
-	mcpServerVersion               = "v0.1.0"
 	pythonExecCapabilityName       = "pythonExec"
 	terminalExecCapabilityName     = "terminalExec"
 	terminalResourceCapabilityName = "terminalResource"
@@ -17,6 +16,8 @@ const (
 	mcpTerminalExecToolTitle       = "Terminal Execute"
 	mcpReadImageToolTitle          = "Read Image"
 )
+
+var mcpServerVersion = consoleVersion()
 
 type mcpEchoToolInput struct {
 	Message   string `json:"message"`
