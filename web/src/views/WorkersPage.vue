@@ -199,6 +199,7 @@ onBeforeUnmount(() => {
 
       <WorkersTable
         :worker-rows="workersStore.workerRows"
+        :inflight-workers="workersStore.inflightData.workers"
         :loading="workersStore.loading"
         :deleting-node-id="workersStore.deletingNodeID"
         :format-capabilities="workersStore.formatCapabilities"

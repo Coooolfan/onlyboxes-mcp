@@ -88,6 +88,33 @@ func (s *activeSession) inflightSnapshot(capability string) (int, int, bool) {
 	return state.inflight, max, true
 }
 
+type capabilitySnapshot struct {
+	name        string
+	inflight    int
+	maxInflight int
+}
+
+func (s *activeSession) allCapabilitiesSnapshot() []capabilitySnapshot {
+	s.capabilitiesMu.Lock()
+	defer s.capabilitiesMu.Unlock()
+	out := make([]capabilitySnapshot, 0, len(s.capabilities))
+	for name, state := range s.capabilities {
+		if state == nil {
+			continue
+		}
+		max := state.maxInflight
+		if max <= 0 {
+			max = defaultCapabilityMaxInflight
+		}
+		out = append(out, capabilitySnapshot{
+			name:        name,
+			inflight:    state.inflight,
+			maxInflight: max,
+		})
+	}
+	return out
+}
+
 func (s *activeSession) tryAcquireCapability(capability string) bool {
 	normalized := normalizeCapability(capability)
 	if normalized == "" {

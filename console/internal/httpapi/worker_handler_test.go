@@ -59,7 +59,7 @@ func (p *fakeWorkerProvisioning) DeleteProvisionedWorker(nodeID string) bool {
 
 func TestListWorkersEmpty(t *testing.T) {
 	store := registrytest.NewStore(t)
-	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, "")
+	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, nil, "")
 	handler.nowFn = func() time.Time {
 		return time.Unix(1_700_000_000, 0)
 	}
@@ -95,7 +95,7 @@ func TestListWorkersPaginationAndFilter(t *testing.T) {
 	store.Upsert(&registryv1.ConnectHello{NodeId: "node-1", NodeName: "node-1"}, "session-1", base.Add(10*time.Second))
 	store.Upsert(&registryv1.ConnectHello{NodeId: "node-3", NodeName: "node-3"}, "session-3", base.Add(12*time.Second))
 
-	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, "")
+	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, nil, "")
 	handler.nowFn = func() time.Time {
 		return base.Add(20 * time.Second)
 	}
@@ -141,7 +141,7 @@ func TestListWorkersPaginationAndFilter(t *testing.T) {
 
 func TestListWorkersRequiresAuthentication(t *testing.T) {
 	store := registrytest.NewStore(t)
-	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, "")
+	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers", nil)
@@ -159,7 +159,7 @@ func TestCreateWorkerSuccess(t *testing.T) {
 		createNodeID: "node-new-1",
 		createSecret: "secret-new-1",
 	}
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, nil, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	cookie := loginSessionCookie(t, router)
 
@@ -190,7 +190,7 @@ func TestCreateWorkerSuccess(t *testing.T) {
 }
 
 func TestCreateWorkerRequiresAuthentication(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, &fakeWorkerProvisioning{}, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, &fakeWorkerProvisioning{}, nil, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workers", strings.NewReader("{}"))
@@ -207,7 +207,7 @@ func TestDeleteWorkerSuccess(t *testing.T) {
 	provisioning := &fakeWorkerProvisioning{
 		secrets: map[string]string{"node-delete-1": "secret-delete-1"},
 	}
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, nil, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	cookie := loginSessionCookie(t, router)
 
@@ -228,7 +228,7 @@ func TestDeleteWorkerNotFound(t *testing.T) {
 	provisioning := &fakeWorkerProvisioning{
 		secrets: map[string]string{"node-delete-1": "secret-delete-1"},
 	}
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, nil, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	cookie := loginSessionCookie(t, router)
 
@@ -246,7 +246,7 @@ func TestDeleteWorkerRequiresAuthentication(t *testing.T) {
 	provisioning := &fakeWorkerProvisioning{
 		secrets: map[string]string{"node-delete-1": "secret-delete-1"},
 	}
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, nil, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/workers/node-delete-1", nil)
@@ -264,6 +264,7 @@ func TestGetWorkerStartupCommandReturnsGone(t *testing.T) {
 		15*time.Second,
 		nil,
 		&fakeWorkerProvisioning{secrets: map[string]string{"node-copy-1": "secret-copy-1"}},
+		nil,
 		":50051",
 	)
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
@@ -286,6 +287,7 @@ func TestGetWorkerStartupCommandRequiresAuthentication(t *testing.T) {
 		15*time.Second,
 		nil,
 		&fakeWorkerProvisioning{secrets: map[string]string{"node-copy-1": "secret-copy-1"}},
+		nil,
 		":50051",
 	)
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
@@ -305,6 +307,7 @@ func TestGetWorkerStartupCommandForMissingWorkerStillReturnsGone(t *testing.T) {
 		15*time.Second,
 		nil,
 		&fakeWorkerProvisioning{secrets: map[string]string{"node-copy-1": "secret-copy-1"}},
+		nil,
 		":50051",
 	)
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
@@ -321,7 +324,7 @@ func TestGetWorkerStartupCommandForMissingWorkerStillReturnsGone(t *testing.T) {
 }
 
 func TestListTrustedTokensSuccess(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, ":50051")
 	mcpAuth := newBareTestMCPAuth()
 	tokenA := "token-a"
 	tokenB := "token-b"
@@ -369,7 +372,7 @@ func TestListTrustedTokensSuccess(t *testing.T) {
 }
 
 func TestListTrustedTokensRequiresAuthentication(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newBareTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/console/tokens", nil)
@@ -382,7 +385,7 @@ func TestListTrustedTokensRequiresAuthentication(t *testing.T) {
 }
 
 func TestNewRouterPanicsWhenMCPAuthIsNil(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, ":50051")
 
 	defer func() {
 		if recover() == nil {
@@ -394,7 +397,7 @@ func TestNewRouterPanicsWhenMCPAuthIsNil(t *testing.T) {
 }
 
 func TestCreateTrustedTokenGetValueReturnsGone(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newBareTestMCPAuth())
 	cookie := loginSessionCookie(t, router)
 
@@ -422,7 +425,7 @@ func TestCreateTrustedTokenGetValueReturnsGone(t *testing.T) {
 }
 
 func TestDeleteTrustedTokenSuccess(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newBareTestMCPAuth())
 	cookie := loginSessionCookie(t, router)
 

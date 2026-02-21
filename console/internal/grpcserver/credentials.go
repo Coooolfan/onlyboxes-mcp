@@ -12,7 +12,6 @@ import (
 )
 
 type WorkerCredential struct {
-	Slot         int    `json:"slot"`
 	WorkerID     string `json:"worker_id"`
 	WorkerSecret string `json:"worker_secret"`
 }
@@ -24,17 +23,16 @@ func GenerateWorkerCredentials(count int) ([]WorkerCredential, map[string]string
 
 	credentials := make([]WorkerCredential, 0, count)
 	secretByWorkerID := make(map[string]string, count)
-	for slot := 1; slot <= count; slot++ {
+	for i := 0; i < count; i++ {
 		workerID, err := generateUUIDv4()
 		if err != nil {
-			return nil, nil, fmt.Errorf("generate worker_id for slot %d: %w", slot, err)
+			return nil, nil, fmt.Errorf("generate worker_id: %w", err)
 		}
 		workerSecret, err := generateSecretHex(32)
 		if err != nil {
-			return nil, nil, fmt.Errorf("generate worker_secret for slot %d: %w", slot, err)
+			return nil, nil, fmt.Errorf("generate worker_secret: %w", err)
 		}
 		credentials = append(credentials, WorkerCredential{
-			Slot:         slot,
 			WorkerID:     workerID,
 			WorkerSecret: workerSecret,
 		})

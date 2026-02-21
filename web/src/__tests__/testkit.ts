@@ -52,6 +52,18 @@ export const workersPayload = {
   page_size: 25,
 }
 
+export const inflightPayload = {
+  workers: [
+    {
+      node_id: 'node-1',
+      capabilities: [
+        { name: 'echo', inflight: 1, max_inflight: 4 },
+      ],
+    },
+  ],
+  generated_at: '2026-02-16T10:00:10Z',
+}
+
 export function defaultTokensPayload() {
   return {
     items: [

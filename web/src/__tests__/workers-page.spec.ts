@@ -6,6 +6,7 @@ import router from '../router'
 import {
   adminSessionPayload,
   defaultTokensPayload,
+  inflightPayload,
   jsonResponse,
   memberSessionPayload,
   mountApp,
@@ -38,6 +39,9 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers/stats')) {
         return authenticated ? jsonResponse(statsPayload) : unauthorizedResponse()
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return authenticated ? jsonResponse(inflightPayload) : unauthorizedResponse()
       }
       if (url.startsWith('/api/v1/workers?')) {
         return authenticated ? jsonResponse(workersPayload) : unauthorizedResponse()
@@ -75,6 +79,9 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers/stats')) {
         return forceUnauthorized ? unauthorizedResponse() : jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return forceUnauthorized ? unauthorizedResponse() : jsonResponse(inflightPayload)
       }
       if (url.startsWith('/api/v1/workers?')) {
         return forceUnauthorized ? unauthorizedResponse() : jsonResponse(workersPayload)
@@ -119,6 +126,9 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers/stats')) {
         return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
@@ -165,6 +175,9 @@ describe('Workers Page', () => {
       if (url.startsWith('/api/v1/workers/stats')) {
         return jsonResponse(statsPayload)
       }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
+      }
       if (url.startsWith('/api/v1/workers?')) {
         return deleted
           ? jsonResponse({ items: [], total: 0, page: 1, page_size: 25 })
@@ -200,6 +213,79 @@ describe('Workers Page', () => {
     wrapper.unmount()
   })
 
+  it('matches capability inflight status with case-insensitive names', async () => {
+    const workersWithMixedCaseCaps = {
+      ...workersPayload,
+      items: [
+        {
+          ...workersPayload.items[0],
+          capabilities: [
+            { name: 'echo' },
+            { name: 'pythonExec' },
+            { name: 'terminalExec' },
+            { name: 'terminalResource' },
+          ],
+        },
+      ],
+    }
+
+    const inflightWithNormalizedCaps = {
+      ...inflightPayload,
+      workers: [
+        {
+          node_id: 'node-1',
+          capabilities: [
+            { name: 'echo', inflight: 1, max_inflight: 4 },
+            { name: 'pythonexec', inflight: 0, max_inflight: 4 },
+            { name: 'terminalexec', inflight: 2, max_inflight: 4 },
+            { name: 'terminalresource', inflight: 3, max_inflight: 6 },
+          ],
+        },
+      ],
+    }
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/console/session') {
+        return jsonResponse(adminSessionPayload)
+      }
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightWithNormalizedCaps)
+      }
+      if (url.startsWith('/api/v1/workers?')) {
+        return jsonResponse(workersWithMixedCaseCaps)
+      }
+      if (url === '/api/v1/console/tokens') {
+        return jsonResponse(defaultTokensPayload())
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = await mountApp('/workers')
+    try {
+      const badgeTexts = wrapper.findAll('.capability-badge').map((item) => item.text())
+
+      expect(
+        badgeTexts.some((text) => text.includes('echo') && text.includes('1/4')),
+      ).toBeTruthy()
+      expect(
+        badgeTexts.some((text) => text.includes('pythonExec') && text.includes('0/4')),
+      ).toBeTruthy()
+      expect(
+        badgeTexts.some((text) => text.includes('terminalExec') && text.includes('2/4')),
+      ).toBeTruthy()
+      expect(
+        badgeTexts.some((text) => text.includes('terminalResource') && text.includes('3/6')),
+      ).toBeTruthy()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('syncs status/page from query and back to URL', async () => {
     const pagedWorkersPayload = {
       ...workersPayload,
@@ -214,6 +300,9 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers/stats')) {
         return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
       }
       if (url.startsWith('/api/v1/workers?status=online&page=2')) {
         return jsonResponse(pagedWorkersPayload)
@@ -256,6 +345,9 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers/stats')) {
         return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
@@ -326,6 +418,9 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers/stats')) {
         return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)

@@ -118,17 +118,9 @@ func (s *Store) SeedProvisionedWorkers(workers []ProvisionedWorker, now time.Tim
 			continue
 		}
 
-		nodeName := fmt.Sprintf("worker-slot-%d", worker.Slot)
-		if worker.Slot <= 0 {
-			nodeName = fmt.Sprintf("worker-slot-%s", shortNodeID(nodeID))
-		}
+		nodeName := fmt.Sprintf("worker-%s", shortNodeID(nodeID))
 
 		labels := cloneMap(worker.Labels)
-		if worker.Slot > 0 {
-			if _, exists := labels["slot"]; !exists {
-				labels["slot"] = fmt.Sprintf("%d", worker.Slot)
-			}
-		}
 
 		inserted := int64(0)
 		err := s.db.WithTx(context.Background(), func(q *sqlc.Queries) error {

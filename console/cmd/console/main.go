@@ -81,6 +81,7 @@ func main() {
 		cfg.OfflineTTL,
 		registryService,
 		registryService,
+		registryService,
 		cfg.GRPCAddr,
 	)
 	consoleAuth := httpapi.NewConsoleAuth(db.Queries, cfg.EnableRegistration)

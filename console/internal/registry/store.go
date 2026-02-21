@@ -50,7 +50,6 @@ type WorkerStats struct {
 }
 
 type ProvisionedWorker struct {
-	Slot   int
 	NodeID string
 	Labels map[string]string
 }

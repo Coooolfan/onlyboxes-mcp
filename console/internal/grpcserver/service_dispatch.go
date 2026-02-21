@@ -245,6 +245,47 @@ func parseEchoPayload(payload []byte) (string, bool) {
 	return decoded.Message, true
 }
 
+// CapabilityInflightEntry holds the inflight snapshot for a single capability.
+type CapabilityInflightEntry struct {
+	Name        string
+	Inflight    int
+	MaxInflight int
+}
+
+// WorkerInflightSnapshot holds the inflight snapshot for a single worker.
+type WorkerInflightSnapshot struct {
+	NodeID       string
+	Capabilities []CapabilityInflightEntry
+}
+
+// InflightStats returns inflight data for all active sessions.
+func (s *RegistryService) InflightStats() []WorkerInflightSnapshot {
+	s.sessionsMu.RLock()
+	sessions := make(map[string]*activeSession, len(s.sessions))
+	for k, v := range s.sessions {
+		sessions[k] = v
+	}
+	s.sessionsMu.RUnlock()
+
+	out := make([]WorkerInflightSnapshot, 0, len(sessions))
+	for _, session := range sessions {
+		caps := session.allCapabilitiesSnapshot()
+		entries := make([]CapabilityInflightEntry, len(caps))
+		for i, c := range caps {
+			entries[i] = CapabilityInflightEntry{
+				Name:        c.name,
+				Inflight:    c.inflight,
+				MaxInflight: c.maxInflight,
+			}
+		}
+		out = append(out, WorkerInflightSnapshot{
+			NodeID:       session.nodeID,
+			Capabilities: entries,
+		})
+	}
+	return out
+}
+
 func buildEchoPayload(message string) []byte {
 	encoded, err := json.Marshal(struct {
 		Message string `json:"message"`

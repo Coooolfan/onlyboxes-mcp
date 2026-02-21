@@ -25,6 +25,7 @@ type WorkerHandler struct {
 	offlineTTL      time.Duration
 	dispatcher      CommandDispatcher
 	provisioning    WorkerProvisioning
+	inflightStats   InflightStatsProvider
 	consoleGRPCAddr string
 	nowFn           func() time.Time
 }
@@ -63,6 +64,7 @@ func NewWorkerHandler(
 	offlineTTL time.Duration,
 	dispatcher CommandDispatcher,
 	provisioning WorkerProvisioning,
+	inflightStats InflightStatsProvider,
 	consoleGRPCAddr string,
 ) *WorkerHandler {
 	return &WorkerHandler{
@@ -70,6 +72,7 @@ func NewWorkerHandler(
 		offlineTTL:      offlineTTL,
 		dispatcher:      dispatcher,
 		provisioning:    provisioning,
+		inflightStats:   inflightStats,
 		consoleGRPCAddr: strings.TrimSpace(consoleGRPCAddr),
 		nowFn:           time.Now,
 	}
@@ -96,6 +99,7 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 	if consoleAuth == nil {
 		api.GET("/workers", workerHandler.ListWorkers)
 		api.GET("/workers/stats", workerHandler.WorkerStats)
+		api.GET("/workers/inflight", workerHandler.WorkerInflight)
 		api.POST("/workers", workerHandler.CreateWorker)
 		api.DELETE("/workers/:node_id", workerHandler.DeleteWorker)
 		registerEmbeddedWebRoutes(router)
@@ -118,6 +122,7 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 	adminDashboard.Use(consoleAuth.RequireAuth(), consoleAuth.RequireAdmin())
 	adminDashboard.GET("/workers", workerHandler.ListWorkers)
 	adminDashboard.GET("/workers/stats", workerHandler.WorkerStats)
+	adminDashboard.GET("/workers/inflight", workerHandler.WorkerInflight)
 	adminDashboard.POST("/workers", workerHandler.CreateWorker)
 	adminDashboard.DELETE("/workers/:node_id", workerHandler.DeleteWorker)
 	adminDashboard.GET("/workers/:node_id/startup-command", workerHandler.GetWorkerStartupCommand)

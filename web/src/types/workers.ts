@@ -32,6 +32,22 @@ export interface WorkerStatsResponse {
   generated_at: string
 }
 
+export interface CapabilityInflightItem {
+  name: string
+  inflight: number
+  max_inflight: number
+}
+
+export interface WorkerInflightItem {
+  node_id: string
+  capabilities: CapabilityInflightItem[]
+}
+
+export interface WorkerInflightResponse {
+  workers: WorkerInflightItem[]
+  generated_at: string
+}
+
 export interface WorkerStartupCommandResponse {
   node_id: string
   command: string

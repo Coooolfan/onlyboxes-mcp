@@ -45,7 +45,7 @@ func TestRegisterAndListLifecycle(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
+	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, registrySvc, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
@@ -130,7 +130,7 @@ func TestRegisterAndListLifecycle(t *testing.T) {
 }
 
 func TestLegacyTokenHeaderIsRejected(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, ":50051")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello"}`))
@@ -167,7 +167,7 @@ func TestEchoCommandLifecycle(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
+	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, registrySvc, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
@@ -271,7 +271,7 @@ func TestTaskLifecycleSync(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
+	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, registrySvc, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
@@ -381,7 +381,7 @@ func TestMCPLifecycle(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
+	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, registrySvc, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
@@ -572,7 +572,7 @@ func TestTerminalLifecycle(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
+	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, registrySvc, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	httpSrv := httptest.NewServer(router)
 	defer httpSrv.Close()
@@ -1057,7 +1057,7 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, ":50051")
+	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, registrySvc, ":50051")
 	mcpAuth := newBareTestMCPAuth()
 	tokenA := testMCPToken
 	tokenB := testMCPTokenB

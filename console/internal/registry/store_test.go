@@ -158,8 +158,8 @@ func TestStoreSeedProvisionedWorkersCountsAsOffline(t *testing.T) {
 	now := time.Unix(1_700_003_000, 0)
 
 	seeded := store.SeedProvisionedWorkers([]ProvisionedWorker{
-		{Slot: 1, NodeID: "seed-node-1", Labels: map[string]string{"region": "us"}},
-		{Slot: 2, NodeID: "seed-node-2"},
+		{NodeID: "seed-node-1", Labels: map[string]string{"region": "us"}},
+		{NodeID: "seed-node-2"},
 	}, now, 15*time.Second)
 	if seeded != 2 {
 		t.Fatalf("expected seeded=2, got %d", seeded)
@@ -177,12 +177,12 @@ func TestStoreSeedProvisionedWorkersCountsAsOffline(t *testing.T) {
 	}
 }
 
-func TestStorePruneOfflineKeepsProvisionedSlots(t *testing.T) {
+func TestStorePruneOfflineKeepsProvisionedWorkers(t *testing.T) {
 	store := newTestStore(t)
 	now := time.Unix(1_700_004_000, 0)
 
 	store.SeedProvisionedWorkers([]ProvisionedWorker{
-		{Slot: 1, NodeID: "seed-node-1"},
+		{NodeID: "seed-node-1"},
 	}, now, 15*time.Second)
 	store.Upsert(&registryv1.ConnectHello{NodeId: "offline-runtime-node"}, "session-offline", now.Add(-30*time.Second))
 

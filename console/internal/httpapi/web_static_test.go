@@ -13,7 +13,7 @@ import (
 func newWebStaticTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
 	return NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 }
 

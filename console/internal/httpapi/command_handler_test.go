@@ -47,7 +47,7 @@ func TestEchoCommandSuccess(t *testing.T) {
 			return message, nil
 		},
 	}
-	handler := NewWorkerHandler(store, 15*time.Second, dispatcher, nil, "")
+	handler := NewWorkerHandler(store, 15*time.Second, dispatcher, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello"}`))
@@ -71,7 +71,7 @@ func TestEchoCommandRejectsInvalidInput(t *testing.T) {
 		dispatch: func(ctx context.Context, message string, timeout time.Duration) (string, error) {
 			return message, nil
 		},
-	}, nil, "")
+	}, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"   ","timeout_ms":0}`))
@@ -93,7 +93,7 @@ func TestEchoCommandRequiresMCPToken(t *testing.T) {
 			return message, nil
 		},
 	}
-	handler := NewWorkerHandler(store, 15*time.Second, dispatcher, nil, "")
+	handler := NewWorkerHandler(store, 15*time.Second, dispatcher, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello"}`))
@@ -112,7 +112,7 @@ func TestEchoCommandMapsNoWorkerError(t *testing.T) {
 		dispatch: func(ctx context.Context, message string, timeout time.Duration) (string, error) {
 			return "", grpcserver.ErrNoEchoWorker
 		},
-	}, nil, "")
+	}, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello","timeout_ms":1000}`))
@@ -133,7 +133,7 @@ func TestEchoCommandMapsCapacityError(t *testing.T) {
 		dispatch: func(ctx context.Context, message string, timeout time.Duration) (string, error) {
 			return "", grpcserver.ErrNoWorkerCapacity
 		},
-	}, nil, "")
+	}, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello","timeout_ms":1000}`))
@@ -154,7 +154,7 @@ func TestEchoCommandMapsTimeoutError(t *testing.T) {
 		dispatch: func(ctx context.Context, message string, timeout time.Duration) (string, error) {
 			return "", grpcserver.ErrEchoTimeout
 		},
-	}, nil, "")
+	}, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello","timeout_ms":1000}`))
@@ -178,7 +178,7 @@ func TestEchoCommandMapsExecutionError(t *testing.T) {
 				Message: "echo is disabled",
 			}
 		},
-	}, nil, "")
+	}, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/echo", strings.NewReader(`{"message":"hello","timeout_ms":1000}`))
@@ -233,7 +233,7 @@ func TestTerminalCommandSuccess(t *testing.T) {
 				Completed: true,
 			}, nil
 		},
-	}, nil, "")
+	}, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/terminal", strings.NewReader(`{"command":"pwd","create_if_missing":true}`))
@@ -284,7 +284,7 @@ func TestTerminalCommandStatusMappings(t *testing.T) {
 						Completed: true,
 					}, nil
 				},
-			}, nil, "")
+			}, nil, nil, "")
 			router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/terminal", strings.NewReader(`{"command":"pwd"}`))
@@ -307,7 +307,7 @@ func TestTerminalCommandRejectsInvalidInput(t *testing.T) {
 		dispatch: func(ctx context.Context, message string, timeout time.Duration) (string, error) {
 			return message, nil
 		},
-	}, nil, "")
+	}, nil, nil, "")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands/terminal", strings.NewReader(`{"command":"   ","timeout_ms":0}`))

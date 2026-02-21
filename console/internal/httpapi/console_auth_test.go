@@ -215,7 +215,7 @@ func TestInitializeAdminAccountReturnsConflictOnUsernameKeyCollision(t *testing.
 }
 
 func TestConsoleAuthLoginLogoutLifecycle(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
 	auth := newTestConsoleAuth(t)
 	router := NewRouter(handler, auth, newTestMCPAuth())
 
@@ -255,7 +255,7 @@ func TestConsoleAuthLoginLogoutLifecycle(t *testing.T) {
 }
 
 func TestConsoleAuthSessionEndpoint(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
 	auth := newTestConsoleAuthWithRegistration(t, true)
 	router := NewRouter(handler, auth, newTestMCPAuth())
 	cookie := loginSessionCookie(t, router)
@@ -284,7 +284,7 @@ func TestConsoleAuthSessionEndpoint(t *testing.T) {
 }
 
 func TestConsoleAuthSessionExpires(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
 	auth := newTestConsoleAuth(t)
 	now := time.Unix(1_700_000_000, 0)
 	auth.nowFn = func() time.Time {
@@ -306,7 +306,7 @@ func TestConsoleAuthSessionExpires(t *testing.T) {
 }
 
 func TestConsoleAuthRegisterAndAdminGuard(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
 	auth := newTestConsoleAuthWithRegistration(t, true)
 	router := NewRouter(handler, auth, newTestMCPAuth())
 	adminCookie := loginSessionCookie(t, router)
@@ -342,7 +342,7 @@ func TestConsoleAuthRegisterAndAdminGuard(t *testing.T) {
 }
 
 func TestConsoleAuthRegisterDuplicateUsernameConflict(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
 	auth := newTestConsoleAuthWithRegistration(t, true)
 	router := NewRouter(handler, auth, newTestMCPAuth())
 	adminCookie := loginSessionCookie(t, router)
@@ -370,7 +370,7 @@ func TestConsoleAuthRegisterDuplicateUsernameConflict(t *testing.T) {
 }
 
 func TestConsoleAuthRegisterDisabled(t *testing.T) {
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, "")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
 	auth := newTestConsoleAuthWithRegistration(t, false)
 	router := NewRouter(handler, auth, newTestMCPAuth())
 	adminCookie := loginSessionCookie(t, router)

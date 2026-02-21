@@ -5,6 +5,7 @@ import { isUnauthorizedError } from '@/services/http'
 import {
   createWorkerAPI,
   deleteWorkerAPI,
+  fetchWorkerInflightAPI,
   fetchWorkersAPI,
   fetchWorkerStatsAPI,
 } from '@/services/workers.api'
@@ -12,6 +13,7 @@ import { redirectToLogin } from '@/stores/auth-redirect'
 import { useAuthStore } from '@/stores/auth'
 import { formatDateTime } from '@/utils/datetime'
 import type {
+  WorkerInflightResponse,
   WorkerItem,
   WorkerListResponse,
   WorkerStartupCommandResponse,
@@ -62,6 +64,7 @@ export const useWorkersStore = defineStore('workers', () => {
 
   const dashboardStats = ref<WorkerStatsResponse>(emptyStats())
   const currentList = ref<WorkerListResponse | null>(null)
+  const inflightData = ref<WorkerInflightResponse>({ workers: [], generated_at: '' })
 
   let timer: ReturnType<typeof setInterval> | null = null
   let loadRequestSerial = 0
@@ -92,6 +95,7 @@ export const useWorkersStore = defineStore('workers', () => {
   function resetDashboard(): void {
     currentList.value = null
     dashboardStats.value = emptyStats()
+    inflightData.value = { workers: [], generated_at: '' }
     refreshedAt.value = null
     page.value = 1
   }
@@ -113,9 +117,10 @@ export const useWorkersStore = defineStore('workers', () => {
     errorMessage.value = ''
 
     try {
-      const [statsRes, listRes] = await Promise.all([
+      const [statsRes, listRes, inflightRes] = await Promise.all([
         fetchWorkerStatsAPI(staleAfterDefaultSec, controller.signal),
         fetchWorkersAPI(statusFilter.value, page.value, pageSize, controller.signal),
+        fetchWorkerInflightAPI(controller.signal),
       ])
 
       if (requestSerial !== loadRequestSerial || controller.signal.aborted) {
@@ -124,6 +129,7 @@ export const useWorkersStore = defineStore('workers', () => {
 
       dashboardStats.value = statsRes
       currentList.value = listRes
+      inflightData.value = inflightRes
       refreshedAt.value = parseTimestamp(statsRes.generated_at) ?? new Date()
 
       if (page.value > totalPages.value) {
@@ -352,6 +358,7 @@ export const useWorkersStore = defineStore('workers', () => {
     deletingNodeID,
     dashboardStats,
     currentList,
+    inflightData,
     totalWorkers,
     onlineWorkers,
     offlineWorkers,

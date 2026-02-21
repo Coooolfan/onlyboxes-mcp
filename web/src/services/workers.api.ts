@@ -3,6 +3,7 @@ import type {
   TrustedTokenCreateInput,
   TrustedTokenCreateResponse,
   TrustedTokenListResponse,
+  WorkerInflightResponse,
   WorkerListResponse,
   WorkerStartupCommandResponse,
   WorkerStatsResponse,
@@ -53,6 +54,21 @@ export async function fetchWorkerStatsAPI(
     offline: payload.offline ?? 0,
     stale: payload.stale ?? 0,
     stale_after_sec: payload.stale_after_sec ?? staleAfterSec,
+    generated_at: payload.generated_at ?? '',
+  }
+}
+
+export async function fetchWorkerInflightAPI(
+  signal: AbortSignal,
+): Promise<WorkerInflightResponse> {
+  const response = await request('/api/v1/workers/inflight', { signal })
+  if (!response.ok) {
+    throw new Error(await parseAPIError(response))
+  }
+
+  const payload = (await response.json()) as WorkerInflightResponse
+  return {
+    workers: payload.workers ?? [],
     generated_at: payload.generated_at ?? '',
   }
 }

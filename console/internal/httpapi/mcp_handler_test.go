@@ -872,7 +872,7 @@ func TestMCPPostRequiresToken(t *testing.T) {
 func newMCPTestRouter(t *testing.T, dispatcher CommandDispatcher) http.Handler {
 	t.Helper()
 
-	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, dispatcher, nil, "")
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, dispatcher, nil, nil, "")
 	return NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 }
 

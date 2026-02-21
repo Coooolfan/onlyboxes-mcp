@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import type { WorkerItem } from '@/types/workers'
+import { computed } from 'vue'
 
-defineProps<{
+import type { WorkerItem, WorkerInflightItem } from '@/types/workers'
+
+const props = defineProps<{
   workerRows: WorkerItem[]
+  inflightWorkers: WorkerInflightItem[]
   loading: boolean
   deletingNodeId: string
   formatCapabilities: (worker: WorkerItem) => string
@@ -15,6 +18,36 @@ defineProps<{
 const emit = defineEmits<{
   deleteWorker: [nodeID: string]
 }>()
+
+type InflightCapability = WorkerInflightItem['capabilities'][number]
+
+function normalizeCapabilityName(name: string): string {
+  return name.trim().toLowerCase()
+}
+
+const inflightByWorker = computed(() => {
+  const out = new Map<string, Map<string, InflightCapability>>()
+  for (const worker of props.inflightWorkers) {
+    const capabilities = new Map<string, InflightCapability>()
+    for (const capability of worker.capabilities) {
+      const normalized = normalizeCapabilityName(capability.name)
+      if (!normalized) {
+        continue
+      }
+      capabilities.set(normalized, capability)
+    }
+    out.set(worker.node_id, capabilities)
+  }
+  return out
+})
+
+function getInflight(nodeId: string, capName: string): InflightCapability | null {
+  const normalized = normalizeCapabilityName(capName)
+  if (!normalized) {
+    return null
+  }
+  return inflightByWorker.value.get(nodeId)?.get(normalized) ?? null
+}
 </script>
 
 <template>
@@ -27,14 +60,13 @@ const emit = defineEmits<{
           <th>Capabilities</th>
           <th>Labels</th>
           <th>Status</th>
-          <th>Registered</th>
-          <th>Last Heartbeat</th>
+          <th>Registered / Last Heartbeat</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="!loading && workerRows.length === 0">
-          <td colspan="8" class="empty-cell">No workers found in current filter.</td>
+          <td colspan="7" class="empty-cell">No workers found in current filter.</td>
         </tr>
         <tr v-for="worker in workerRows" :key="worker.node_id">
           <td>
@@ -47,9 +79,23 @@ const emit = defineEmits<{
               class="capabilities-list"
               v-if="worker.capabilities && worker.capabilities.length > 0"
             >
-              <span class="capability-badge" v-for="cap in worker.capabilities" :key="cap.name">{{
-                cap.name
-              }}</span>
+              <span class="capability-badge" v-for="cap in worker.capabilities" :key="cap.name">
+                {{ cap.name }}
+                <span
+                  v-if="getInflight(worker.node_id, cap.name)"
+                  class="inflight-tag"
+                  :class="{
+                    active: getInflight(worker.node_id, cap.name)!.inflight > 0,
+                    full:
+                      getInflight(worker.node_id, cap.name)!.inflight >=
+                      getInflight(worker.node_id, cap.name)!.max_inflight,
+                  }"
+                >
+                  {{ getInflight(worker.node_id, cap.name)!.inflight }}/{{
+                    getInflight(worker.node_id, cap.name)!.max_inflight
+                  }}
+                </span>
+              </span>
             </div>
             <span v-else>--</span>
           </td>
@@ -57,8 +103,10 @@ const emit = defineEmits<{
           <td>
             <span :class="['status-pill', worker.status]">{{ worker.status }}</span>
           </td>
-          <td>{{ formatDateTime(worker.registered_at) }}</td>
-          <td>{{ formatAge(worker.last_seen_at) }}</td>
+          <td>
+            <div class="time-main">{{ formatDateTime(worker.registered_at) }}</div>
+            <div class="time-sub">{{ formatAge(worker.last_seen_at) }}</div>
+          </td>
           <td>
             <div class="row-actions">
               <button
@@ -146,9 +194,42 @@ tr:hover {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--text-secondary);
+  gap: 6px;
+}
+
+.inflight-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  color: var(--text-tertiary);
+}
+
+.inflight-tag.active {
+  color: var(--text-primary);
+  border-color: var(--stroke-hover);
+  background: var(--surface-soft);
+}
+
+.inflight-tag.full {
+  color: #b45309;
+  background: #fffbeb;
+  border-color: #fcd34d;
 }
 
 .node-sub {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.time-main {
+  font-size: 14px;
+}
+
+.time-sub {
   margin-top: 4px;
   color: var(--text-secondary);
   font-family: 'JetBrains Mono', monospace;
