@@ -161,7 +161,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="worker-modal-content">
-        <p class="worker-modal-note">启动信息仅在创建时返回，请立即复制并安全保存。</p>
+        <p class="worker-modal-note">Startup details are returned only once at creation time. Copy and store them securely now.</p>
 
         <div class="worker-meta">
           <p>

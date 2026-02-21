@@ -335,7 +335,7 @@ onBeforeUnmount(() => {
 
       <div class="token-modal-content-wrapper">
         <template v-if="!createdToken">
-          <p class="token-modal-copy">创建后会展示一次明文 token，关闭后不可再次查看。</p>
+          <p class="token-modal-copy">The plaintext token is shown only once after creation and cannot be viewed again after closing this dialog.</p>
           <form class="token-modal-form" @submit.prevent="submitCreateToken">
             <label class="token-field">
               <span>Name</span>
@@ -371,7 +371,7 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else>
-          <p class="token-modal-copy">这是唯一一次展示明文 token，请立即复制并安全保存。</p>
+          <p class="token-modal-copy">This is the only time the plaintext token is shown. Copy and store it securely now.</p>
           <code class="token-plain-value">{{ createdToken.token }}</code>
           <div class="token-result-meta">
             <p><span>Name</span>{{ createdToken.name }}</p>

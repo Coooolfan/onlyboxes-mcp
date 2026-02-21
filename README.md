@@ -1,6 +1,6 @@
 # Onlyboxes
 
-[简体中文文档](README.zh-CN.md)
+[简体中文](README.zh-CN.md)
 
 Onlyboxes is a self-hosted code execution sandbox platform for individuals and small teams.
 It uses a control-plane (`console`) and execution-plane (`worker-docker`) architecture, and exposes both REST APIs and MCP tools.
@@ -11,8 +11,6 @@ It uses a control-plane (`console`) and execution-plane (`worker-docker`) archit
 > `worker-docker` rejects insecure console endpoints by default; plaintext is allowed only when `WORKER_CONSOLE_INSECURE=true` is explicitly set.
 >
 > Put both console HTTP (`:8089`) and gRPC (`:50051`) endpoints behind your reverse proxy/gateway and enforce TLS for external traffic.
->
-> Deploy only on trusted private networks or encrypted tunnels, and do not expose the gRPC port directly to the public internet.
 
 ## Architecture
 
@@ -69,13 +67,17 @@ Console endpoints:
 
 - Open `http://127.0.0.1:8089` in your browser.
 - Sign in with the initialized admin account.
+![Console login page](static/docs/quickstart-login.png)
 - Go to the token management page and create an access token.
+![Token created dialog (one-time plaintext token)](static/docs/quickstart-token-modal.png)
 - Save the plaintext token immediately (it is returned only once).
 
 ### 4) Create a worker identity in dashboard
 
 - Go to Workers page and create a worker.
+![Workers page](static/docs/quickstart-workers-page.png)
 - Copy and securely store the startup command from the creation dialog (`WORKER_SECRET` is one-time visible).
+![Worker created dialog (startup command and one-time secret)](static/docs/quickstart-worker-created-modal.png)
 
 ### 5) Run `worker-docker`
 
