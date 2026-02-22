@@ -4,9 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 
 import router from '../router'
 import {
-  defaultAccountsPayload,
   adminSessionPayload,
-  defaultTokensPayload,
   inflightPayload,
   jsonResponse,
   memberSessionPayload,
@@ -47,12 +45,6 @@ describe('Workers Page', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return authenticated ? jsonResponse(workersPayload) : unauthorizedResponse()
       }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return authenticated ? jsonResponse(defaultAccountsPayload()) : unauthorizedResponse()
-      }
-      if (url === '/api/v1/console/tokens') {
-        return authenticated ? jsonResponse(defaultTokensPayload()) : unauthorizedResponse()
-      }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
@@ -90,12 +82,6 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return forceUnauthorized ? unauthorizedResponse() : jsonResponse(workersPayload)
-      }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return forceUnauthorized ? unauthorizedResponse() : jsonResponse(defaultAccountsPayload())
-      }
-      if (url === '/api/v1/console/tokens') {
-        return forceUnauthorized ? unauthorizedResponse() : jsonResponse(defaultTokensPayload())
       }
       throw new Error(`unexpected url: ${url}`)
     })
@@ -140,12 +126,6 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
-      }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return jsonResponse(defaultAccountsPayload())
-      }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
       }
       if (url === '/api/v1/workers' && method === 'POST') {
         return jsonResponse({ node_id: 'node-2', command: createCommand })
@@ -193,12 +173,6 @@ describe('Workers Page', () => {
         return deleted
           ? jsonResponse({ items: [], total: 0, page: 1, page_size: 25 })
           : jsonResponse(workersPayload)
-      }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return jsonResponse(defaultAccountsPayload())
-      }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
       }
       if (url === '/api/v1/workers/node-1' && method === 'DELETE') {
         deleted = true
@@ -272,12 +246,6 @@ describe('Workers Page', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersWithMixedCaseCaps)
       }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return jsonResponse(defaultAccountsPayload())
-      }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
-      }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
@@ -325,12 +293,6 @@ describe('Workers Page', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
       }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return jsonResponse(defaultAccountsPayload())
-      }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
-      }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
@@ -354,180 +316,6 @@ describe('Workers Page', () => {
     wrapper.unmount()
   })
 
-  it('shows create-account panel when registration is enabled and submits form', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input)
-      const method = String(init?.method ?? 'GET').toUpperCase()
-      if (url === '/api/v1/console/session') {
-        return jsonResponse(adminSessionPayload)
-      }
-      if (url.startsWith('/api/v1/workers/stats')) {
-        return jsonResponse(statsPayload)
-      }
-      if (url.startsWith('/api/v1/workers/inflight')) {
-        return jsonResponse(inflightPayload)
-      }
-      if (url.startsWith('/api/v1/workers?')) {
-        return jsonResponse(workersPayload)
-      }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return jsonResponse(defaultAccountsPayload())
-      }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
-      }
-      if (url === '/api/v1/console/register' && method === 'POST') {
-        return jsonResponse({
-          account: {
-            account_id: 'acc-member-new',
-            username: 'member-new',
-            is_admin: false,
-          },
-          created_at: '2026-02-20T00:00:00Z',
-          updated_at: '2026-02-20T00:00:00Z',
-        })
-      }
-      throw new Error(`unexpected url: ${url} method=${method}`)
-    })
-    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
-
-    const wrapper = await mountApp('/workers')
-    try {
-      const openCreateAccountBtn = wrapper
-        .findAll('button')
-        .find(
-          (button) => button.text() === 'Create Account' && button.classes().includes('ghost-btn'),
-        )
-      expect(openCreateAccountBtn).toBeTruthy()
-      await openCreateAccountBtn?.trigger('click')
-      await flushPromises()
-
-      const createAccountModal = wrapper.find('.account-modal')
-      expect(createAccountModal.exists()).toBe(true)
-
-      const createAccountNameInput = createAccountModal.find('input[type="text"]')
-      const createAccountPasswordInput = createAccountModal.find('input[type="password"]')
-      expect(createAccountNameInput.exists()).toBe(true)
-      expect(createAccountPasswordInput.exists()).toBe(true)
-      await createAccountNameInput.setValue('member-new')
-      await createAccountPasswordInput.setValue('member-pass')
-      await createAccountModal.get('form.account-form').trigger('submit.prevent')
-      await flushPromises()
-
-      expect(wrapper.text()).toContain('Created account member-new')
-      expect((createAccountNameInput.element as HTMLInputElement).value).toBe('')
-      expect((createAccountPasswordInput.element as HTMLInputElement).value).toBe('')
-      const registerCall = fetchMock.mock.calls.find(
-        ([url, init]) =>
-          String(url) === '/api/v1/console/register' &&
-          String((init as RequestInit | undefined)?.method).toUpperCase() === 'POST',
-      )
-      expect(registerCall).toBeTruthy()
-    } finally {
-      wrapper.unmount()
-    }
-  })
-
-  it('hides create-account panel when registration is disabled', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url === '/api/v1/console/session') {
-        return jsonResponse({
-          ...adminSessionPayload,
-          registration_enabled: false,
-        })
-      }
-      if (url.startsWith('/api/v1/workers/stats')) {
-        return jsonResponse(statsPayload)
-      }
-      if (url.startsWith('/api/v1/workers/inflight')) {
-        return jsonResponse(inflightPayload)
-      }
-      if (url.startsWith('/api/v1/workers?')) {
-        return jsonResponse(workersPayload)
-      }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return jsonResponse(defaultAccountsPayload())
-      }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
-      }
-      throw new Error(`unexpected url: ${url}`)
-    })
-    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
-
-    const wrapper = await mountApp('/workers')
-
-    expect(wrapper.find('#create-account-username').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Create Account')
-
-    wrapper.unmount()
-  })
-
-  it('loads accounts and deletes a member account', async () => {
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    )
-
-    let accountItems = defaultAccountsPayload().items
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input)
-      const method = String(init?.method ?? 'GET').toUpperCase()
-      if (url === '/api/v1/console/session') {
-        return jsonResponse(adminSessionPayload)
-      }
-      if (url.startsWith('/api/v1/workers/stats')) {
-        return jsonResponse(statsPayload)
-      }
-      if (url.startsWith('/api/v1/workers/inflight')) {
-        return jsonResponse(inflightPayload)
-      }
-      if (url.startsWith('/api/v1/workers?')) {
-        return jsonResponse(workersPayload)
-      }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return jsonResponse({
-          items: accountItems,
-          total: accountItems.length,
-          page: 1,
-          page_size: 20,
-        })
-      }
-      if (url === '/api/v1/console/accounts/acc-member' && method === 'DELETE') {
-        accountItems = accountItems.filter((item) => item.account_id !== 'acc-member')
-        return noContentResponse()
-      }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
-      }
-      throw new Error(`unexpected url: ${url} method=${method}`)
-    })
-    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
-
-    const wrapper = await mountApp('/workers')
-    try {
-      expect(wrapper.find('.account-panel').exists()).toBe(true)
-      expect(wrapper.text()).toContain('member-test')
-
-      const accountDeleteBtn = wrapper.find('.account-panel .account-delete-btn')
-      expect(accountDeleteBtn.exists()).toBe(true)
-      await accountDeleteBtn.trigger('click')
-      await flushPromises()
-      await flushPromises()
-
-      const deleteCall = fetchMock.mock.calls.find(
-        ([url, init]) =>
-          String(url) === '/api/v1/console/accounts/acc-member' &&
-          String((init as RequestInit | undefined)?.method).toUpperCase() === 'DELETE',
-      )
-      expect(deleteCall).toBeTruthy()
-      expect(wrapper.text()).not.toContain('member-test')
-    } finally {
-      wrapper.unmount()
-    }
-  })
-
   it('changes password from workers page modal', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
@@ -544,14 +332,8 @@ describe('Workers Page', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
       }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return jsonResponse(defaultAccountsPayload())
-      }
       if (url === '/api/v1/console/password' && method === 'POST') {
         return noContentResponse()
-      }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
       }
       throw new Error(`unexpected url: ${url} method=${method}`)
     })
@@ -599,7 +381,10 @@ describe('Workers Page', () => {
         return jsonResponse(memberSessionPayload)
       }
       if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
+        return jsonResponse({
+          items: [],
+          total: 0,
+        })
       }
       if (url.startsWith('/api/v1/workers')) {
         throw new Error(`workers api should not be called for non-admin: ${url}`)

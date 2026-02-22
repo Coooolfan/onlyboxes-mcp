@@ -40,12 +40,6 @@ describe('Auth Routing', () => {
       if (url.startsWith('/api/v1/workers/inflight')) {
         return jsonResponse(inflightPayload)
       }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return jsonResponse(defaultAccountsPayload())
-      }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
-      }
       throw new Error(`unexpected url: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
@@ -61,6 +55,27 @@ describe('Auth Routing', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/v1/console/session')).toBe(
       true,
     )
+
+    wrapper.unmount()
+  })
+
+  it('allows admin /accounts access', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/console/session') {
+        return jsonResponse(adminSessionPayload)
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse(defaultAccountsPayload())
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = await mountApp('/accounts')
+
+    expect(router.currentRoute.value.path).toBe('/accounts')
+    expect(wrapper.text()).toContain('Account Administration')
 
     wrapper.unmount()
   })
@@ -86,6 +101,30 @@ describe('Auth Routing', () => {
     expect(router.currentRoute.value.path).toBe('/tokens')
     expect(wrapper.text()).toContain('Trusted Token Management')
     expect(wrapper.text()).not.toContain('Execution Node Control Panel')
+
+    wrapper.unmount()
+  })
+
+  it('redirects non-admin /accounts access to /tokens', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/console/session') {
+        return jsonResponse(memberSessionPayload)
+      }
+      if (url === '/api/v1/console/tokens') {
+        return jsonResponse(defaultTokensPayload())
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        throw new Error(`accounts api should not be called for non-admin: ${url}`)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = await mountApp('/accounts')
+
+    expect(router.currentRoute.value.path).toBe('/tokens')
+    expect(wrapper.text()).toContain('Trusted Token Management')
 
     wrapper.unmount()
   })
@@ -201,12 +240,6 @@ describe('Auth Routing', () => {
       }
       if (url.startsWith('/api/v1/workers/inflight')) {
         return jsonResponse(inflightPayload)
-      }
-      if (url.startsWith('/api/v1/console/accounts?')) {
-        return jsonResponse(defaultAccountsPayload())
-      }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
       }
       throw new Error(`unexpected url: ${url}`)
     })

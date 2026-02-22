@@ -3,9 +3,10 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import ErrorBanner from '@/components/common/ErrorBanner.vue'
+import AccountsPanel from '@/components/dashboard/AccountsPanel.vue'
 import ChangePasswordModal from '@/components/dashboard/ChangePasswordModal.vue'
 import ConsoleRouteTabs from '@/components/dashboard/ConsoleRouteTabs.vue'
-import TrustedTokensPanel from '@/components/dashboard/TrustedTokensPanel.vue'
+import CreateAccountModal from '@/components/dashboard/CreateAccountModal.vue'
 import { useAccountsStore } from '@/stores/accounts'
 import { useAuthStore } from '@/stores/auth'
 import { useTokensStore } from '@/stores/tokens'
@@ -16,14 +17,18 @@ const accountsStore = useAccountsStore()
 const tokensStore = useTokensStore()
 const workersStore = useWorkersStore()
 const router = useRouter()
+
 const showChangePasswordModal = ref(false)
+const showCreateAccountModal = ref(false)
 
 const refreshedAtText = computed(() => {
-  if (!tokensStore.refreshedAt) {
+  if (!accountsStore.refreshedAt) {
     return 'never'
   }
-  return tokensStore.formatDateTime(tokensStore.refreshedAt.toISOString())
+  return accountsStore.formatDateTime(accountsStore.refreshedAt.toISOString())
 })
+
+const showCreateAccountPanel = computed(() => authStore.isAdmin && authStore.registrationEnabled)
 
 async function handleLogout(): Promise<void> {
   await authStore.logout()
@@ -36,6 +41,10 @@ async function handleLogout(): Promise<void> {
   await router.replace('/login')
 }
 
+async function handleRefresh(): Promise<void> {
+  await accountsStore.loadAccounts(accountsStore.page)
+}
+
 function openChangePasswordModal(): void {
   showChangePasswordModal.value = true
 }
@@ -44,17 +53,25 @@ function closeChangePasswordModal(): void {
   showChangePasswordModal.value = false
 }
 
+function openCreateAccountModal(): void {
+  showCreateAccountModal.value = true
+}
+
+function closeCreateAccountModal(): void {
+  showCreateAccountModal.value = false
+}
+
 onMounted(async () => {
-  await tokensStore.loadTokens()
+  await accountsStore.loadAccounts(accountsStore.page)
 })
 
 onBeforeUnmount(() => {
-  tokensStore.teardown()
+  accountsStore.teardown()
 })
 </script>
 
 <template>
-  <main class="relative z-2 mx-auto w-[min(960px,100%)] grid gap-6">
+  <main class="relative z-2 mx-auto w-[min(1240px,100%)] grid gap-6">
     <ConsoleRouteTabs />
 
     <header
@@ -62,10 +79,10 @@ onBeforeUnmount(() => {
     >
       <div>
         <p class="m-0 font-mono text-xs tracking-[0.05em] uppercase text-secondary">
-          Onlyboxes / Token Console
+          Onlyboxes / Account Console
         </p>
         <h1 class="mt-3 mb-2 text-2xl font-semibold leading-[1.2] tracking-[-0.02em]">
-          Trusted Token Management
+          Account Administration
         </h1>
         <p class="m-0 text-secondary text-sm leading-normal">
           Account: <strong>{{ authStore.currentAccount?.username ?? '--' }}</strong>
@@ -74,12 +91,20 @@ onBeforeUnmount(() => {
 
       <div class="flex items-center gap-3 max-[960px]:w-full max-[960px]:flex-wrap">
         <button
+          v-if="showCreateAccountPanel"
+          class="ghost-btn rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
+          type="button"
+          @click="openCreateAccountModal"
+        >
+          Create Account
+        </button>
+        <button
           class="rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-white bg-accent border border-accent transition-all duration-200 hover:not-disabled:bg-[#333] hover:not-disabled:border-[#333] disabled:cursor-not-allowed disabled:opacity-50"
           type="button"
-          :disabled="tokensStore.loading"
-          @click="tokensStore.loadTokens"
+          :disabled="accountsStore.loading"
+          @click="handleRefresh"
         >
-          {{ tokensStore.loading ? 'Refreshing...' : 'Refresh' }}
+          {{ accountsStore.loading ? 'Refreshing...' : 'Refresh' }}
         </button>
         <button
           class="rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
@@ -98,33 +123,30 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <section class="border border-stroke rounded-lg bg-surface shadow-card overflow-hidden">
-      <div class="flex justify-end items-center px-6 py-3 border-b border-stroke bg-surface-soft">
-        <p class="m-0 text-secondary text-[13px]">
-          Last refresh:
-          <span class="text-primary font-medium">{{ refreshedAtText }}</span>
-        </p>
-      </div>
+    <ErrorBanner v-if="accountsStore.errorMessage" :message="accountsStore.errorMessage" />
 
-      <ErrorBanner
-        v-if="tokensStore.errorMessage"
-        :message="tokensStore.errorMessage"
-        class="mx-6 mt-4"
-      />
+    <AccountsPanel
+      v-if="authStore.isAdmin"
+      :accounts="accountsStore.accounts"
+      :total="accountsStore.total"
+      :page="accountsStore.page"
+      :total-pages="accountsStore.totalPages"
+      :can-prev="accountsStore.canPrev"
+      :can-next="accountsStore.canNext"
+      :footer-text="accountsStore.footerText"
+      :loading="accountsStore.loading"
+      :refreshed-at-text="refreshedAtText"
+      :current-account-id="authStore.currentAccount?.account_id ?? ''"
+      :deleting-account-id="accountsStore.deletingAccountID"
+      :delete-button-text="accountsStore.deleteAccountButtonText"
+      :format-date-time="accountsStore.formatDateTime"
+      @refresh="accountsStore.loadAccounts(accountsStore.page)"
+      @prev-page="accountsStore.previousPage"
+      @next-page="accountsStore.nextPage"
+      @delete-account="accountsStore.deleteAccount"
+    />
 
-      <div class="p-6">
-        <TrustedTokensPanel
-          :tokens="tokensStore.trustedTokens"
-          :creating-token="tokensStore.creatingTrustedToken"
-          :deleting-token-id="tokensStore.deletingTrustedTokenID"
-          :delete-button-text="tokensStore.trustedTokenDeleteButtonText"
-          :create-token="tokensStore.createTrustedToken"
-          :format-date-time="tokensStore.formatDateTime"
-          @delete-token="tokensStore.deleteTrustedToken"
-        />
-      </div>
-    </section>
-
+    <CreateAccountModal v-if="showCreateAccountModal" @close="closeCreateAccountModal" />
     <ChangePasswordModal v-if="showChangePasswordModal" @close="closeChangePasswordModal" />
   </main>
 </template>

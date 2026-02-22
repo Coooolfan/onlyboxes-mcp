@@ -3,7 +3,6 @@ defineProps<{
   creatingWorker: boolean
   autoRefreshEnabled: boolean
   loading: boolean
-  showCreateAccount?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -12,7 +11,6 @@ const emit = defineEmits<{
   refresh: []
   changePassword: []
   logout: []
-  createAccount: []
 }>()
 </script>
 
@@ -33,14 +31,6 @@ const emit = defineEmits<{
     </div>
 
     <div class="flex items-center gap-3 max-[960px]:w-full max-[960px]:flex-wrap">
-      <button
-        v-if="showCreateAccount"
-        class="ghost-btn rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
-        type="button"
-        @click="emit('createAccount')"
-      >
-        Create Account
-      </button>
       <button
         class="rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-white bg-accent border border-accent transition-all duration-200 hover:not-disabled:bg-[#333] hover:not-disabled:border-[#333] disabled:cursor-not-allowed disabled:opacity-50"
         type="button"

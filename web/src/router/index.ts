@@ -30,6 +30,15 @@ const router = createRouter({
       },
     },
     {
+      path: '/accounts',
+      name: 'accounts',
+      component: () => import('@/views/AccountsPage.vue'),
+      meta: {
+        requiresAuth: true,
+        requiresAdmin: true,
+      },
+    },
+    {
       path: '/tokens',
       name: 'tokens',
       component: () => import('@/views/TokensPage.vue'),

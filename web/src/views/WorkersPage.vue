@@ -3,14 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import ErrorBanner from '@/components/common/ErrorBanner.vue'
-import AccountsPanel from '@/components/dashboard/AccountsPanel.vue'
 import ChangePasswordModal from '@/components/dashboard/ChangePasswordModal.vue'
+import ConsoleRouteTabs from '@/components/dashboard/ConsoleRouteTabs.vue'
 import DashboardHeader from '@/components/dashboard/DashboardHeader.vue'
 import PaginationBar from '@/components/dashboard/PaginationBar.vue'
 import StatsGrid from '@/components/dashboard/StatsGrid.vue'
-import TrustedTokensPanel from '@/components/dashboard/TrustedTokensPanel.vue'
 import WorkerCreateResultModal from '@/components/dashboard/WorkerCreateResultModal.vue'
-import CreateAccountModal from '@/components/dashboard/CreateAccountModal.vue'
 import WorkersTable from '@/components/dashboard/WorkersTable.vue'
 import WorkersToolbar from '@/components/dashboard/WorkersToolbar.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -26,10 +24,7 @@ const workersStore = useWorkersStore()
 const route = useRoute()
 const router = useRouter()
 const createdWorkerPayload = ref<WorkerStartupCommandResponse | null>(null)
-const showCreateAccountModal = ref(false)
 const showChangePasswordModal = ref(false)
-
-const showCreateAccountPanel = computed(() => authStore.isAdmin && authStore.registrationEnabled)
 
 function parseStatus(raw: unknown): WorkerStatus {
   return raw === 'online' || raw === 'offline' || raw === 'all' ? raw : 'all'
@@ -93,13 +88,6 @@ const refreshedAtText = computed(() => {
   return workersStore.formatDateTime(workersStore.refreshedAt.toISOString())
 })
 
-const accountsRefreshedAtText = computed(() => {
-  if (!accountsStore.refreshedAt) {
-    return 'never'
-  }
-  return accountsStore.formatDateTime(accountsStore.refreshedAt.toISOString())
-})
-
 function handleVisibilityChange(): void {
   workersStore.onPageVisibilityChange()
 }
@@ -116,11 +104,7 @@ async function handleLogout(): Promise<void> {
 }
 
 async function handleRefresh(): Promise<void> {
-  await Promise.all([
-    workersStore.loadDashboard(),
-    tokensStore.loadTokens(),
-    accountsStore.loadAccounts(accountsStore.page),
-  ])
+  await workersStore.loadDashboard()
 }
 
 async function handleAddWorker(): Promise<void> {
@@ -133,14 +117,6 @@ async function handleAddWorker(): Promise<void> {
 
 function closeWorkerCreateResultModal(): void {
   createdWorkerPayload.value = null
-}
-
-function openCreateAccountModal(): void {
-  showCreateAccountModal.value = true
-}
-
-function closeCreateAccountModal(): void {
-  showCreateAccountModal.value = false
 }
 
 function openChangePasswordModal(): void {
@@ -167,36 +143,30 @@ watch(
 
 onMounted(async () => {
   syncStoreFromRoute(false)
-  await Promise.all([
-    workersStore.loadDashboard(),
-    tokensStore.loadTokens(),
-    accountsStore.loadAccounts(accountsStore.page),
-  ])
+  await workersStore.loadDashboard()
   workersStore.startAutoRefresh()
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onBeforeUnmount(() => {
-  accountsStore.teardown()
   workersStore.teardown()
-  tokensStore.teardown()
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
 <template>
   <main class="relative z-2 mx-auto w-[min(1240px,100%)] grid gap-6">
+    <ConsoleRouteTabs />
+
     <DashboardHeader
       :creating-worker="workersStore.creatingWorker"
       :auto-refresh-enabled="workersStore.autoRefreshEnabled"
       :loading="workersStore.loading"
-      :show-create-account="showCreateAccountPanel"
       @add-worker="handleAddWorker"
       @toggle-auto-refresh="workersStore.toggleAutoRefresh"
       @refresh="handleRefresh"
       @change-password="openChangePasswordModal"
       @logout="handleLogout"
-      @create-account="openCreateAccountModal"
     />
 
     <StatsGrid
@@ -205,16 +175,6 @@ onBeforeUnmount(() => {
       :offline-workers="workersStore.offlineWorkers"
       :stale-workers="workersStore.staleWorkers"
       :stale-workers-label="workersStore.staleWorkersLabel"
-    />
-
-    <TrustedTokensPanel
-      :tokens="tokensStore.trustedTokens"
-      :creating-token="tokensStore.creatingTrustedToken"
-      :deleting-token-id="tokensStore.deletingTrustedTokenID"
-      :delete-button-text="tokensStore.trustedTokenDeleteButtonText"
-      :create-token="tokensStore.createTrustedToken"
-      :format-date-time="tokensStore.formatDateTime"
-      @delete-token="tokensStore.deleteTrustedToken"
     />
 
     <section
@@ -257,38 +217,11 @@ onBeforeUnmount(() => {
       />
     </section>
 
-    <ErrorBanner
-      v-if="authStore.isAdmin && accountsStore.errorMessage"
-      :message="accountsStore.errorMessage"
-    />
-
-    <AccountsPanel
-      v-if="authStore.isAdmin"
-      :accounts="accountsStore.accounts"
-      :total="accountsStore.total"
-      :page="accountsStore.page"
-      :total-pages="accountsStore.totalPages"
-      :can-prev="accountsStore.canPrev"
-      :can-next="accountsStore.canNext"
-      :footer-text="accountsStore.footerText"
-      :loading="accountsStore.loading"
-      :refreshed-at-text="accountsRefreshedAtText"
-      :current-account-id="authStore.currentAccount?.account_id ?? ''"
-      :deleting-account-id="accountsStore.deletingAccountID"
-      :delete-button-text="accountsStore.deleteAccountButtonText"
-      :format-date-time="accountsStore.formatDateTime"
-      @refresh="accountsStore.loadAccounts(accountsStore.page)"
-      @prev-page="accountsStore.previousPage"
-      @next-page="accountsStore.nextPage"
-      @delete-account="accountsStore.deleteAccount"
-    />
-
     <WorkerCreateResultModal
       :payload="createdWorkerPayload"
       @close="closeWorkerCreateResultModal"
     />
 
-    <CreateAccountModal v-if="showCreateAccountModal" @close="closeCreateAccountModal" />
     <ChangePasswordModal v-if="showChangePasswordModal" @close="closeChangePasswordModal" />
   </main>
 </template>
