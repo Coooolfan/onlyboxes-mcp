@@ -14,17 +14,7 @@ It uses a control-plane (`console`) and execution-plane (`worker-docker`) archit
 
 ## Architecture
 
-```text
-                                              +-----------------+      +----------------------+
-                                       /----> | worker (Docker) | ---> | Docker containers    |
-                                      /       +-----------------+      +----------------------+
-Developer          +---------+       /        +-----------------+      +----------------------+
-API Client   <---> | console | <--->{  -----> | worker (Boxlite)| ---> | Boxlite environments |
-MCP Client         +---------+       \        +-----------------+      +----------------------+
-                                      \       +-----------------+      +----------------------+
-                                       \----> | worker (OS sys) | ---> | OS Processes         |
-                                              +-----------------+      +----------------------+
-```
+![Architecture](static/architecture.svg)
 
 ## Key Features
 
