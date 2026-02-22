@@ -3,7 +3,6 @@ import type { WorkerStatus } from '@/types/workers'
 
 defineProps<{
   statusFilter: WorkerStatus
-  refreshedAtText: string
 }>()
 
 const emit = defineEmits<{
@@ -12,7 +11,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="flex justify-between items-center gap-4 px-6 py-4 border-b border-stroke bg-surface-soft max-[960px]:flex-col max-[960px]:items-start">
+  <div class="flex items-center gap-4 px-6 py-4 border-b border-stroke bg-surface-soft">
     <div class="inline-flex gap-1 bg-surface border border-stroke rounded-default p-1">
       <button
         type="button"
@@ -51,10 +50,5 @@ const emit = defineEmits<{
         Offline
       </button>
     </div>
-
-    <p class="m-0 text-secondary text-[13px]">
-      Last refresh:
-      <span class="text-primary font-medium">{{ refreshedAtText }}</span>
-    </p>
   </div>
 </template>

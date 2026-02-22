@@ -10,7 +10,6 @@ defineProps<{
   canNext: boolean
   footerText: string
   loading: boolean
-  refreshedAtText: string
   currentAccountId: string
   deletingAccountId: string
   deleteButtonText: (accountID: string) => string
@@ -18,7 +17,6 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  refresh: []
   prevPage: []
   nextPage: []
   deleteAccount: [accountID: string]
@@ -29,23 +27,11 @@ const emit = defineEmits<{
   <section
     class="account-panel border border-stroke rounded-lg bg-surface shadow-card overflow-hidden animate-[rise-in_620ms_ease-out] max-[620px]:rounded-default"
   >
-    <div
-      class="flex items-start justify-between gap-4 px-6 py-5 border-b border-stroke bg-surface-soft max-[760px]:flex-col"
-    >
+    <div class="px-6 py-5 border-b border-stroke bg-surface-soft">
       <div>
         <h2 class="m-0 text-lg font-semibold">Accounts</h2>
         <p class="mt-1 mb-0 text-secondary text-sm">{{ footerText }} accounts</p>
-        <p class="mt-1 mb-0 text-secondary text-[13px]">Last refresh: {{ refreshedAtText }}</p>
       </div>
-
-      <button
-        type="button"
-        class="rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
-        :disabled="loading"
-        @click="emit('refresh')"
-      >
-        {{ loading ? 'Refreshing...' : 'Refresh Accounts' }}
-      </button>
     </div>
 
     <div class="overflow-x-auto">

@@ -13,12 +13,16 @@ const router = createRouter({
       component: LandingRouteView,
       meta: {
         resolveLanding: true,
+        layout: 'default',
       },
     },
     {
       path: '/login',
       name: 'login',
       component: () => import('@/views/LoginPage.vue'),
+      meta: {
+        layout: 'default',
+      },
     },
     {
       path: '/workers',
@@ -27,6 +31,7 @@ const router = createRouter({
       meta: {
         requiresAuth: true,
         requiresAdmin: true,
+        layout: 'dashboard',
       },
     },
     {
@@ -36,6 +41,7 @@ const router = createRouter({
       meta: {
         requiresAuth: true,
         requiresAdmin: true,
+        layout: 'dashboard',
       },
     },
     {
@@ -44,6 +50,7 @@ const router = createRouter({
       component: () => import('@/views/TokensPage.vue'),
       meta: {
         requiresAuth: true,
+        layout: 'dashboard',
       },
     },
     {
@@ -52,6 +59,7 @@ const router = createRouter({
       component: LandingRouteView,
       meta: {
         resolveLanding: true,
+        layout: 'default',
       },
     },
   ],
