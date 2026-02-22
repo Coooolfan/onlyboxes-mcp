@@ -70,7 +70,7 @@ function closeChangePasswordModal() {
 }
 
 function toggleSidebar() {
-  sidebarCollapsed.value = !sidebarCollapsed.value
+  // sidebarCollapsed.value = !sidebarCollapsed.value
 }
 
 function handleCollapsedSidebarHeaderClick() {
