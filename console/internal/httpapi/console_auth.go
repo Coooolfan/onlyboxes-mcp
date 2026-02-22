@@ -30,9 +30,15 @@ var (
 	errAccountUsernameRequired        = errors.New("username is required")
 	errAccountUsernameTooLong         = errors.New("username length must be <= 64")
 	errAccountPasswordRequired        = errors.New("password is required")
+	errAccountCurrentPasswordRequired = errors.New("current_password is required")
+	errAccountNewPasswordRequired     = errors.New("new_password is required")
+	errAccountCurrentPasswordInvalid  = errors.New("invalid current password")
 	errAccountRegistrationDisabled    = errors.New("registration is disabled")
 	errAccountRegistrationConflict    = errors.New("username already exists")
 	errAccountInvalidCredentialRecord = errors.New("invalid account credential record")
+	errAccountNotFound                = errors.New("account not found")
+	errAccountDeleteSelfForbidden     = errors.New("cannot delete current account")
+	errAccountDeleteAdminForbidden    = errors.New("cannot delete admin account")
 	accountIDGenerator                = generateAccountID
 )
 
@@ -87,6 +93,11 @@ type registerAccountRequest struct {
 	Password string `json:"password"`
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 type accountSessionResponse struct {
 	Authenticated       bool           `json:"authenticated,omitempty"`
 	Account             SessionAccount `json:"account"`
@@ -99,6 +110,21 @@ type registerAccountResponse struct {
 	Account   SessionAccount `json:"account"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+type accountListItem struct {
+	AccountID string    `json:"account_id"`
+	Username  string    `json:"username"`
+	IsAdmin   bool      `json:"is_admin"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type accountListResponse struct {
+	Items    []accountListItem `json:"items"`
+	Total    int               `json:"total"`
+	Page     int               `json:"page"`
+	PageSize int               `json:"page_size"`
 }
 
 type createAccountInput struct {

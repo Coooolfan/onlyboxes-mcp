@@ -19,3 +19,15 @@ export interface RegisterAccountPayload {
   created_at: string
   updated_at: string
 }
+
+export interface AccountListItem extends AccountProfile {
+  created_at: string
+  updated_at: string
+}
+
+export interface AccountListResponse {
+  items: AccountListItem[]
+  total: number
+  page: number
+  page_size: number
+}

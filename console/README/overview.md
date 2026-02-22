@@ -66,7 +66,12 @@ The console service hosts:
   - login response includes `authenticated`, `account`, `registration_enabled`, `console_version`, `console_repo_url`.
   - `POST /api/v1/console/logout`.
   - `GET /api/v1/console/session` returns current session account payload with `console_version` and `console_repo_url`.
+  - `POST /api/v1/console/password` changes current account password (requires `current_password` + `new_password`; successful update rotates account sessions).
   - `POST /api/v1/console/register` creates non-admin account (admin-only, and only when `CONSOLE_ENABLE_REGISTRATION=true`).
+  - account management (admin only):
+    - `GET /api/v1/console/accounts` lists accounts with pagination (`page`, `page_size`).
+    - `DELETE /api/v1/console/accounts/:account_id` deletes a non-admin account.
+    - deleting self and deleting admin accounts are both rejected with `403`.
   - token management (requires dashboard auth):
     - `GET /api/v1/console/tokens` list current account token metadata (`id`, `name`, masked token).
     - `POST /api/v1/console/tokens` create token bound to current account (manual token or auto-generated, plaintext returned only in create response).
@@ -107,7 +112,9 @@ Dashboard account behavior:
 - if account already exists, the above env credentials are ignored.
 - initial admin plaintext password is logged only when initialized for the first time.
 - dashboard session is in-memory only; restarting `console` invalidates all dashboard login sessions.
+- changing account password rotates (invalidates + recreates) current account sessions.
 - admin can create non-admin accounts via `POST /api/v1/console/register` when `CONSOLE_ENABLE_REGISTRATION=true`.
+- admin can list all accounts and delete non-admin accounts; deleting self/admin accounts is blocked.
 
 Trusted token behavior:
 - tokens are persisted in SQLite and managed by dashboard APIs.

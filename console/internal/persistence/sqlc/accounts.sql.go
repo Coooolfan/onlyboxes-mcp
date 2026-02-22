@@ -9,6 +9,18 @@ import (
 	"context"
 )
 
+const countAccounts = `-- name: CountAccounts :one
+SELECT COUNT(*)
+FROM accounts
+`
+
+func (q *Queries) CountAccounts(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAccounts)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countAdminAccounts = `-- name: CountAdminAccounts :one
 SELECT COUNT(*)
 FROM accounts
@@ -20,6 +32,33 @@ func (q *Queries) CountAdminAccounts(ctx context.Context) (int64, error) {
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const deleteAccountByID = `-- name: DeleteAccountByID :execrows
+DELETE FROM accounts
+WHERE account_id = ?
+`
+
+func (q *Queries) DeleteAccountByID(ctx context.Context, accountID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteAccountByID, accountID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteNonAdminAccountByID = `-- name: DeleteNonAdminAccountByID :execrows
+DELETE FROM accounts
+WHERE account_id = ?
+  AND is_admin = 0
+`
+
+func (q *Queries) DeleteNonAdminAccountByID(ctx context.Context, accountID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteNonAdminAccountByID, accountID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const getAccountByID = `-- name: GetAccountByID :one
@@ -152,4 +191,86 @@ func (q *Queries) InsertAccount(ctx context.Context, arg InsertAccountParams) er
 		arg.UpdatedAtUnixMs,
 	)
 	return err
+}
+
+const listAccountsPage = `-- name: ListAccountsPage :many
+SELECT
+    account_id,
+    username,
+    is_admin,
+    created_at_unix_ms,
+    updated_at_unix_ms
+FROM accounts
+ORDER BY created_at_unix_ms DESC, account_id ASC
+LIMIT ? OFFSET ?
+`
+
+type ListAccountsPageParams struct {
+	Limit  int64 `json:"limit"`
+	Offset int64 `json:"offset"`
+}
+
+type ListAccountsPageRow struct {
+	AccountID       string `json:"account_id"`
+	Username        string `json:"username"`
+	IsAdmin         int64  `json:"is_admin"`
+	CreatedAtUnixMs int64  `json:"created_at_unix_ms"`
+	UpdatedAtUnixMs int64  `json:"updated_at_unix_ms"`
+}
+
+func (q *Queries) ListAccountsPage(ctx context.Context, arg ListAccountsPageParams) ([]ListAccountsPageRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAccountsPage, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAccountsPageRow
+	for rows.Next() {
+		var i ListAccountsPageRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.Username,
+			&i.IsAdmin,
+			&i.CreatedAtUnixMs,
+			&i.UpdatedAtUnixMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateAccountPasswordByID = `-- name: UpdateAccountPasswordByID :execrows
+UPDATE accounts
+SET password_hash = ?,
+    hash_algo = ?,
+    updated_at_unix_ms = ?
+WHERE account_id = ?
+`
+
+type UpdateAccountPasswordByIDParams struct {
+	PasswordHash    string `json:"password_hash"`
+	HashAlgo        string `json:"hash_algo"`
+	UpdatedAtUnixMs int64  `json:"updated_at_unix_ms"`
+	AccountID       string `json:"account_id"`
+}
+
+func (q *Queries) UpdateAccountPasswordByID(ctx context.Context, arg UpdateAccountPasswordByIDParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateAccountPasswordByID,
+		arg.PasswordHash,
+		arg.HashAlgo,
+		arg.UpdatedAtUnixMs,
+		arg.AccountID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

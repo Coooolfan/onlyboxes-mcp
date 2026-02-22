@@ -22,7 +22,9 @@ Onlyboxes has two auth paths:
 - Used by:
   - `/api/v1/console/session`
   - `/api/v1/console/logout`
+  - `/api/v1/console/password`
   - `/api/v1/console/register`
+  - `/api/v1/console/accounts*`
   - `/api/v1/console/tokens*`
   - `/api/v1/workers*` (admin routes)
 - Session TTL is 12 hours in-memory; console restart invalidates all sessions.
@@ -140,6 +142,77 @@ Validation and errors:
 - `400` username empty, username length > 64, or password empty
 - `409` username already exists (case-insensitive)
 - `500` database/internal failure
+
+### 3.5 Change Current Account Password
+
+`POST /api/v1/console/password`
+
+Request:
+
+```json
+{
+  "current_password": "old-password",
+  "new_password": "new-password"
+}
+```
+
+Responses:
+
+- `204` password updated
+- `400` invalid JSON body, missing `current_password`, or missing `new_password`
+- `401` current password is incorrect
+- `500` internal failure
+
+Notes:
+
+- This endpoint requires dashboard session auth.
+- Password update rotates active sessions for the account.
+
+### 3.6 List Accounts (Admin Only)
+
+`GET /api/v1/console/accounts?page=1&page_size=20`
+
+Query:
+
+- `page`: positive integer, default `1`
+- `page_size`: positive integer, default `20`, max `100`
+
+Success `200`:
+
+```json
+{
+  "items": [
+    {
+      "account_id": "acc_xxx",
+      "username": "admin",
+      "is_admin": true,
+      "created_at": "2026-02-21T00:00:00Z",
+      "updated_at": "2026-02-21T00:00:00Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+Errors:
+
+- `400` invalid query values
+- `403` caller is not admin
+- `500` database/internal failure
+
+### 3.7 Delete Account (Admin Only)
+
+`DELETE /api/v1/console/accounts/:account_id`
+
+Responses:
+
+- `204` deleted
+- `403` deleting current account is forbidden
+- `403` deleting admin account is forbidden
+- `404` account not found
+- `500` internal failure
 
 ## 4. Token Management APIs (Dashboard Auth)
 

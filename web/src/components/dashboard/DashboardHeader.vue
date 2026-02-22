@@ -10,23 +10,32 @@ const emit = defineEmits<{
   addWorker: []
   toggleAutoRefresh: []
   refresh: []
+  changePassword: []
   logout: []
   createAccount: []
 }>()
 </script>
 
 <template>
-  <header class="flex items-start justify-between gap-5 bg-surface border border-stroke rounded-lg p-8 shadow-card animate-rise-in max-[960px]:flex-col">
+  <header
+    class="flex items-start justify-between gap-5 bg-surface border border-stroke rounded-lg p-8 shadow-card animate-rise-in max-[960px]:flex-col"
+  >
     <div>
-      <p class="m-0 font-mono text-xs tracking-[0.05em] uppercase text-secondary">Onlyboxes / Worker Registry</p>
-      <h1 class="mt-3 mb-2 text-2xl font-semibold leading-[1.2] tracking-[-0.02em]">Execution Node Control Panel</h1>
-      <p class="m-0 text-secondary text-sm max-w-[62ch] leading-normal">Real-time monitoring for worker registration and heartbeat health.</p>
+      <p class="m-0 font-mono text-xs tracking-[0.05em] uppercase text-secondary">
+        Onlyboxes / Worker Registry
+      </p>
+      <h1 class="mt-3 mb-2 text-2xl font-semibold leading-[1.2] tracking-[-0.02em]">
+        Execution Node Control Panel
+      </h1>
+      <p class="m-0 text-secondary text-sm max-w-[62ch] leading-normal">
+        Real-time monitoring for worker registration and heartbeat health.
+      </p>
     </div>
 
     <div class="flex items-center gap-3 max-[960px]:w-full max-[960px]:flex-wrap">
       <button
         v-if="showCreateAccount"
-        class="rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
+        class="ghost-btn rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
         type="button"
         @click="emit('createAccount')"
       >
@@ -54,6 +63,13 @@ const emit = defineEmits<{
         @click="emit('refresh')"
       >
         {{ loading ? 'Refreshing...' : 'Refresh Now' }}
+      </button>
+      <button
+        class="rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
+        type="button"
+        @click="emit('changePassword')"
+      >
+        Change Password
       </button>
       <button
         class="rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"

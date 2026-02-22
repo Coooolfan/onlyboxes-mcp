@@ -12,15 +12,19 @@ const consoleRepoURL = computed(() => authStore.consoleRepoURL || defaultConsole
 </script>
 
 <template>
-  <div class="relative min-h-screen px-6 pt-8 pb-5 flex flex-col gap-4 max-[620px]:px-4 max-[620px]:pt-6 max-[620px]:pb-4">
+  <div
+    class="relative min-h-screen px-6 pt-8 pb-5 flex flex-col gap-4 max-[620px]:px-4 max-[620px]:pt-6 max-[620px]:pb-4"
+  >
     <div class="flex-1">
       <RouterView />
     </div>
-    <footer class="mx-auto w-[min(1240px,100%)] flex items-center justify-end gap-2 text-secondary text-xs leading-normal font-mono max-[620px]:justify-start">
+    <footer
+      class="mx-auto w-[min(1240px,100%)] flex items-center justify-end gap-2 text-secondary text-xs leading-normal font-mono max-[620px]:justify-start"
+    >
       <span>Console {{ consoleVersionText }}</span>
       <span>·</span>
       <a
-        class="text-secondary underline underline-offset-2 hover:text-primary"
+        class="console-footer-link text-secondary underline underline-offset-2 hover:text-primary"
         :href="consoleRepoURL"
         target="_blank"
         rel="noopener noreferrer"

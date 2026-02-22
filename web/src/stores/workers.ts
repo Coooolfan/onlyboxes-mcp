@@ -346,6 +346,17 @@ export const useWorkersStore = defineStore('workers', () => {
     stopAutoRefresh()
   }
 
+  function reset(): void {
+    statusFilter.value = 'all'
+    loading.value = false
+    errorMessage.value = ''
+    refreshedAt.value = null
+    autoRefreshEnabled.value = true
+    creatingWorker.value = false
+    deletingNodeID.value = ''
+    resetDashboard()
+  }
+
   return {
     pageSize,
     statusFilter,
@@ -386,5 +397,6 @@ export const useWorkersStore = defineStore('workers', () => {
     stopAutoRefresh,
     onPageVisibilityChange,
     teardown,
+    reset,
   }
 })

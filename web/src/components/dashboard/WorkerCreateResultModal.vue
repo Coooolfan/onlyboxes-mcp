@@ -148,9 +148,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="payload" class="fixed inset-0 z-1000 bg-black/40 backdrop-blur-xs flex items-center justify-center p-6" @click.self="closeModal">
+  <div
+    v-if="payload"
+    class="fixed inset-0 z-1000 bg-black/40 backdrop-blur-xs flex items-center justify-center p-6"
+    @click.self="closeModal"
+  >
     <div
-      class="w-[min(640px,100%)] rounded-lg border border-stroke bg-surface shadow-modal flex flex-col"
+      class="worker-modal w-[min(640px,100%)] rounded-lg border border-stroke bg-surface shadow-modal flex flex-col"
       role="dialog"
       aria-modal="true"
       aria-labelledby="worker-created-dialog-title"
@@ -167,16 +171,30 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="p-6 grid gap-5">
-        <p class="m-0 text-secondary text-sm leading-normal">Startup details are returned only once at creation time. Copy and store them securely now.</p>
+        <p class="m-0 text-secondary text-sm leading-normal">
+          Startup details are returned only once at creation time. Copy and store them securely now.
+        </p>
 
         <div class="grid gap-3">
           <p class="m-0 flex items-start gap-3 max-[700px]:flex-wrap max-[700px]:gap-1">
-            <span class="shrink-0 w-[120px] text-secondary text-[13px] font-medium max-[700px]:w-full">Node ID</span>
-            <code class="flex-1 min-w-0 font-mono text-[13px] bg-surface-soft border border-stroke rounded-default px-2 py-1 break-all whitespace-pre-wrap">{{ payload.node_id }}</code>
+            <span
+              class="shrink-0 w-[120px] text-secondary text-[13px] font-medium max-[700px]:w-full"
+              >Node ID</span
+            >
+            <code
+              class="flex-1 min-w-0 font-mono text-[13px] bg-surface-soft border border-stroke rounded-default px-2 py-1 break-all whitespace-pre-wrap"
+              >{{ payload.node_id }}</code
+            >
           </p>
           <p class="m-0 flex items-start gap-3 max-[700px]:flex-wrap max-[700px]:gap-1">
-            <span class="shrink-0 w-[120px] text-secondary text-[13px] font-medium max-[700px]:w-full">Worker Secret</span>
-            <code class="flex-1 min-w-0 font-mono text-[13px] bg-surface-soft border border-stroke rounded-default px-2 py-1 break-all whitespace-pre-wrap">{{ workerSecretDisplay }}</code>
+            <span
+              class="shrink-0 w-[120px] text-secondary text-[13px] font-medium max-[700px]:w-full"
+              >Worker Secret</span
+            >
+            <code
+              class="flex-1 min-w-0 font-mono text-[13px] bg-surface-soft border border-stroke rounded-default px-2 py-1 break-all whitespace-pre-wrap"
+              >{{ workerSecretDisplay }}</code
+            >
             <button
               v-if="workerSecret"
               type="button"
@@ -191,11 +209,16 @@ onBeforeUnmount(() => {
 
         <div class="grid gap-2">
           <p class="m-0 text-primary text-sm font-medium">Startup Command</p>
-          <code class="block border border-stroke rounded-default bg-black text-white p-4 font-mono text-[13px] leading-[1.6] break-all whitespace-pre-wrap">{{ commandText }}</code>
+          <code
+            class="block border border-stroke rounded-default bg-black text-white p-4 font-mono text-[13px] leading-[1.6] break-all whitespace-pre-wrap"
+            >{{ commandText }}</code
+          >
         </div>
       </div>
 
-      <div class="flex justify-end gap-3 px-6 py-5 border-t border-stroke rounded-b-lg max-[700px]:flex-col-reverse max-[700px]:[&>button]:w-full">
+      <div
+        class="flex justify-end gap-3 px-6 py-5 border-t border-stroke rounded-b-lg max-[700px]:flex-col-reverse max-[700px]:[&>button]:w-full"
+      >
         <button
           type="button"
           class="rounded-md px-3 py-1.5 text-[13px] font-medium h-8 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"

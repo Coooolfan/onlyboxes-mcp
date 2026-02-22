@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 
 import router from '../router'
 import {
+  defaultAccountsPayload,
   adminSessionPayload,
   defaultTokensPayload,
   inflightPayload,
@@ -46,6 +47,9 @@ describe('Workers Page', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return authenticated ? jsonResponse(workersPayload) : unauthorizedResponse()
       }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return authenticated ? jsonResponse(defaultAccountsPayload()) : unauthorizedResponse()
+      }
       if (url === '/api/v1/console/tokens') {
         return authenticated ? jsonResponse(defaultTokensPayload()) : unauthorizedResponse()
       }
@@ -86,6 +90,9 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return forceUnauthorized ? unauthorizedResponse() : jsonResponse(workersPayload)
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return forceUnauthorized ? unauthorizedResponse() : jsonResponse(defaultAccountsPayload())
       }
       if (url === '/api/v1/console/tokens') {
         return forceUnauthorized ? unauthorizedResponse() : jsonResponse(defaultTokensPayload())
@@ -133,6 +140,9 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse(defaultAccountsPayload())
       }
       if (url === '/api/v1/console/tokens') {
         return jsonResponse(defaultTokensPayload())
@@ -183,6 +193,9 @@ describe('Workers Page', () => {
         return deleted
           ? jsonResponse({ items: [], total: 0, page: 1, page_size: 25 })
           : jsonResponse(workersPayload)
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse(defaultAccountsPayload())
       }
       if (url === '/api/v1/console/tokens') {
         return jsonResponse(defaultTokensPayload())
@@ -259,6 +272,9 @@ describe('Workers Page', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersWithMixedCaseCaps)
       }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse(defaultAccountsPayload())
+      }
       if (url === '/api/v1/console/tokens') {
         return jsonResponse(defaultTokensPayload())
       }
@@ -270,9 +286,7 @@ describe('Workers Page', () => {
     try {
       const badgeTexts = wrapper.findAll('.capability-badge').map((item) => item.text())
 
-      expect(
-        badgeTexts.some((text) => text.includes('echo') && text.includes('1/4')),
-      ).toBeTruthy()
+      expect(badgeTexts.some((text) => text.includes('echo') && text.includes('1/4'))).toBeTruthy()
       expect(
         badgeTexts.some((text) => text.includes('pythonExec') && text.includes('0/4')),
       ).toBeTruthy()
@@ -310,6 +324,9 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse(defaultAccountsPayload())
       }
       if (url === '/api/v1/console/tokens') {
         return jsonResponse(defaultTokensPayload())
@@ -352,6 +369,9 @@ describe('Workers Page', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse(defaultAccountsPayload())
       }
       if (url === '/api/v1/console/tokens') {
         return jsonResponse(defaultTokensPayload())
@@ -426,6 +446,9 @@ describe('Workers Page', () => {
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
       }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse(defaultAccountsPayload())
+      }
       if (url === '/api/v1/console/tokens') {
         return jsonResponse(defaultTokensPayload())
       }
@@ -439,6 +462,134 @@ describe('Workers Page', () => {
     expect(wrapper.text()).not.toContain('Create Account')
 
     wrapper.unmount()
+  })
+
+  it('loads accounts and deletes a member account', async () => {
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+
+    let accountItems = defaultAccountsPayload().items
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = String(init?.method ?? 'GET').toUpperCase()
+      if (url === '/api/v1/console/session') {
+        return jsonResponse(adminSessionPayload)
+      }
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
+      }
+      if (url.startsWith('/api/v1/workers?')) {
+        return jsonResponse(workersPayload)
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse({
+          items: accountItems,
+          total: accountItems.length,
+          page: 1,
+          page_size: 20,
+        })
+      }
+      if (url === '/api/v1/console/accounts/acc-member' && method === 'DELETE') {
+        accountItems = accountItems.filter((item) => item.account_id !== 'acc-member')
+        return noContentResponse()
+      }
+      if (url === '/api/v1/console/tokens') {
+        return jsonResponse(defaultTokensPayload())
+      }
+      throw new Error(`unexpected url: ${url} method=${method}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = await mountApp('/workers')
+    try {
+      expect(wrapper.find('.account-panel').exists()).toBe(true)
+      expect(wrapper.text()).toContain('member-test')
+
+      const accountDeleteBtn = wrapper.find('.account-panel .account-delete-btn')
+      expect(accountDeleteBtn.exists()).toBe(true)
+      await accountDeleteBtn.trigger('click')
+      await flushPromises()
+      await flushPromises()
+
+      const deleteCall = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/v1/console/accounts/acc-member' &&
+          String((init as RequestInit | undefined)?.method).toUpperCase() === 'DELETE',
+      )
+      expect(deleteCall).toBeTruthy()
+      expect(wrapper.text()).not.toContain('member-test')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('changes password from workers page modal', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = String(init?.method ?? 'GET').toUpperCase()
+      if (url === '/api/v1/console/session') {
+        return jsonResponse(adminSessionPayload)
+      }
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
+      }
+      if (url.startsWith('/api/v1/workers?')) {
+        return jsonResponse(workersPayload)
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse(defaultAccountsPayload())
+      }
+      if (url === '/api/v1/console/password' && method === 'POST') {
+        return noContentResponse()
+      }
+      if (url === '/api/v1/console/tokens') {
+        return jsonResponse(defaultTokensPayload())
+      }
+      throw new Error(`unexpected url: ${url} method=${method}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = await mountApp('/workers')
+    try {
+      const changePasswordBtn = wrapper
+        .findAll('button')
+        .find((button) => button.text() === 'Change Password')
+      expect(changePasswordBtn).toBeTruthy()
+      await changePasswordBtn?.trigger('click')
+      await flushPromises()
+
+      const modal = wrapper.find('.password-modal')
+      expect(modal.exists()).toBe(true)
+      await modal.get('#current-password').setValue('password-test')
+      await modal.get('#new-password').setValue('password-next')
+      await modal.get('form.password-form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('Password updated successfully.')
+      const passwordCall = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/v1/console/password' &&
+          String((init as RequestInit | undefined)?.method).toUpperCase() === 'POST',
+      )
+      expect(passwordCall).toBeTruthy()
+      const passwordPayload = JSON.parse(
+        String((passwordCall?.[1] as RequestInit | undefined)?.body),
+      )
+      expect(passwordPayload).toEqual({
+        current_password: 'password-test',
+        new_password: 'password-next',
+      })
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('redirects non-admin /workers access to /tokens', async () => {

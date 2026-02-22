@@ -1,12 +1,14 @@
 package httpapi
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/onlyboxes/onlyboxes/console/internal/persistence/sqlc"
 )
 
 func (a *ConsoleAuth) Login(c *gin.Context) {
@@ -112,6 +114,183 @@ func (a *ConsoleAuth) Register(c *gin.Context) {
 		CreatedAt: created.CreatedAt,
 		UpdatedAt: created.UpdatedAt,
 	})
+}
+
+func (a *ConsoleAuth) ChangePassword(c *gin.Context) {
+	sessionAccount, ok := requireSessionAccount(c)
+	if !ok {
+		return
+	}
+
+	var req changePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	currentPassword := strings.TrimSpace(req.CurrentPassword)
+	if currentPassword == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": errAccountCurrentPasswordRequired.Error()})
+		return
+	}
+	newPassword := strings.TrimSpace(req.NewPassword)
+	if newPassword == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": errAccountNewPasswordRequired.Error()})
+		return
+	}
+
+	accountRecord, err := a.queries.GetAccountByID(c.Request.Context(), strings.TrimSpace(sessionAccount.AccountID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			a.deleteSessionsByAccountID(sessionAccount.AccountID)
+			a.clearSessionCookie(c)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
+		return
+	}
+	if !a.verifyPassword(accountRecord, currentPassword) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": errAccountCurrentPasswordInvalid.Error()})
+		return
+	}
+
+	newPasswordHash, err := hashDashboardPassword(newPassword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
+		return
+	}
+
+	now := time.Now()
+	if a.nowFn != nil {
+		now = a.nowFn()
+	}
+
+	updatedRows, err := a.queries.UpdateAccountPasswordByID(c.Request.Context(), sqlc.UpdateAccountPasswordByIDParams{
+		PasswordHash:    newPasswordHash,
+		HashAlgo:        dashboardPasswordHashAlgo,
+		UpdatedAtUnixMs: now.UnixMilli(),
+		AccountID:       strings.TrimSpace(sessionAccount.AccountID),
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
+		return
+	}
+	if updatedRows == 0 {
+		a.deleteSessionsByAccountID(sessionAccount.AccountID)
+		a.clearSessionCookie(c)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	renewedAccount := SessionAccount{
+		AccountID: strings.TrimSpace(accountRecord.AccountID),
+		Username:  strings.TrimSpace(accountRecord.Username),
+		IsAdmin:   accountRecord.IsAdmin == 1,
+	}
+	a.deleteSessionsByAccountID(renewedAccount.AccountID)
+
+	sessionID, expiresAt, err := a.createSession(renewedAccount)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh session"})
+		return
+	}
+
+	a.setSessionCookie(c, sessionID, expiresAt)
+	c.Status(http.StatusNoContent)
+}
+
+func (a *ConsoleAuth) ListAccounts(c *gin.Context) {
+	page, ok := parsePositiveIntQuery(c, "page", 1)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page must be a positive integer"})
+		return
+	}
+	pageSize, ok := parsePositiveIntQuery(c, "page_size", 20)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page_size must be a positive integer"})
+		return
+	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+
+	total, err := a.queries.CountAccounts(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list accounts"})
+		return
+	}
+
+	offset := (page - 1) * pageSize
+	records, err := a.queries.ListAccountsPage(c.Request.Context(), sqlc.ListAccountsPageParams{
+		Limit:  int64(pageSize),
+		Offset: int64(offset),
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list accounts"})
+		return
+	}
+
+	items := make([]accountListItem, 0, len(records))
+	for _, record := range records {
+		items = append(items, accountListItem{
+			AccountID: strings.TrimSpace(record.AccountID),
+			Username:  strings.TrimSpace(record.Username),
+			IsAdmin:   record.IsAdmin == 1,
+			CreatedAt: time.UnixMilli(record.CreatedAtUnixMs),
+			UpdatedAt: time.UnixMilli(record.UpdatedAtUnixMs),
+		})
+	}
+
+	c.JSON(http.StatusOK, accountListResponse{
+		Items:    items,
+		Total:    int(total),
+		Page:     page,
+		PageSize: pageSize,
+	})
+}
+
+func (a *ConsoleAuth) DeleteAccount(c *gin.Context) {
+	currentAccount, ok := requireSessionAccount(c)
+	if !ok {
+		return
+	}
+
+	targetAccountID := strings.TrimSpace(c.Param("account_id"))
+	if targetAccountID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "account_id is required"})
+		return
+	}
+	if targetAccountID == strings.TrimSpace(currentAccount.AccountID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": errAccountDeleteSelfForbidden.Error()})
+		return
+	}
+
+	deletedRows, err := a.queries.DeleteNonAdminAccountByID(c.Request.Context(), targetAccountID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete account"})
+		return
+	}
+	if deletedRows == 0 {
+		record, lookupErr := a.queries.GetAccountByID(c.Request.Context(), targetAccountID)
+		if lookupErr != nil {
+			if errors.Is(lookupErr, sql.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{"error": errAccountNotFound.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete account"})
+			return
+		}
+		if record.IsAdmin == 1 {
+			c.JSON(http.StatusForbidden, gin.H{"error": errAccountDeleteAdminForbidden.Error()})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": errAccountNotFound.Error()})
+		return
+	}
+
+	a.deleteSessionsByAccountID(targetAccountID)
+	c.Status(http.StatusNoContent)
 }
 
 func (a *ConsoleAuth) Logout(c *gin.Context) {

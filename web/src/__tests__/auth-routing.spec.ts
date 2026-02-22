@@ -5,7 +5,9 @@ import { flushPromises } from '@vue/test-utils'
 import router from '../router'
 import {
   adminSessionPayload,
+  defaultAccountsPayload,
   defaultTokensPayload,
+  inflightPayload,
   jsonResponse,
   memberSessionPayload,
   mountApp,
@@ -34,6 +36,12 @@ describe('Auth Routing', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse(defaultAccountsPayload())
       }
       if (url === '/api/v1/console/tokens') {
         return jsonResponse(defaultTokensPayload())
@@ -190,6 +198,12 @@ describe('Auth Routing', () => {
       }
       if (url.startsWith('/api/v1/workers?')) {
         return jsonResponse(workersPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
+      }
+      if (url.startsWith('/api/v1/console/accounts?')) {
+        return jsonResponse(defaultAccountsPayload())
       }
       if (url === '/api/v1/console/tokens') {
         return jsonResponse(defaultTokensPayload())

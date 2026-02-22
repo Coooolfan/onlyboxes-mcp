@@ -112,6 +112,7 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 
 	dashboard := api.Group("/")
 	dashboard.Use(consoleAuth.RequireAuth())
+	dashboard.POST("/console/password", consoleAuth.ChangePassword)
 	dashboard.GET("/console/tokens", mcpAuth.ListTokens)
 	dashboard.POST("/console/tokens", mcpAuth.CreateToken)
 	dashboard.DELETE("/console/tokens/:token_id", mcpAuth.DeleteToken)
@@ -120,6 +121,8 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 
 	adminDashboard := api.Group("/")
 	adminDashboard.Use(consoleAuth.RequireAuth(), consoleAuth.RequireAdmin())
+	adminDashboard.GET("/console/accounts", consoleAuth.ListAccounts)
+	adminDashboard.DELETE("/console/accounts/:account_id", consoleAuth.DeleteAccount)
 	adminDashboard.GET("/workers", workerHandler.ListWorkers)
 	adminDashboard.GET("/workers/stats", workerHandler.WorkerStats)
 	adminDashboard.GET("/workers/inflight", workerHandler.WorkerInflight)

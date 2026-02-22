@@ -60,9 +60,7 @@ export const inflightPayload = {
   workers: [
     {
       node_id: 'node-1',
-      capabilities: [
-        { name: 'echo', inflight: 1, max_inflight: 4 },
-      ],
+      capabilities: [{ name: 'echo', inflight: 1, max_inflight: 4 }],
     },
   ],
   generated_at: '2026-02-16T10:00:10Z',
@@ -80,6 +78,30 @@ export function defaultTokensPayload() {
       },
     ],
     total: 1,
+  }
+}
+
+export function defaultAccountsPayload() {
+  return {
+    items: [
+      {
+        account_id: 'acc-admin',
+        username: 'admin-test',
+        is_admin: true,
+        created_at: '2026-02-16T10:00:00Z',
+        updated_at: '2026-02-16T10:00:00Z',
+      },
+      {
+        account_id: 'acc-member',
+        username: 'member-test',
+        is_admin: false,
+        created_at: '2026-02-16T11:00:00Z',
+        updated_at: '2026-02-16T11:00:00Z',
+      },
+    ],
+    total: 2,
+    page: 1,
+    page_size: 20,
   }
 }
 

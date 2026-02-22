@@ -1,41 +1,53 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { createAccountAPI } from '@/services/auth.api'
+
+import { changePasswordAPI } from '@/services/auth.api'
+import { isUnauthorizedError } from '@/services/http'
+import { redirectToLogin } from '@/stores/auth-redirect'
 
 const emit = defineEmits<{
   close: []
 }>()
 
-const createAccountUsername = ref('')
-const createAccountPassword = ref('')
-const creatingAccount = ref(false)
-const createAccountError = ref('')
-const createAccountSuccess = ref('')
+const currentPassword = ref('')
+const newPassword = ref('')
+const changingPassword = ref(false)
+const changePasswordError = ref('')
+const changePasswordSuccess = ref('')
 
-async function submitCreateAccount(): Promise<void> {
-  if (creatingAccount.value) {
-    return
-  }
-  const username = createAccountUsername.value.trim()
-  const password = createAccountPassword.value
-  if (!username || !password) {
-    createAccountError.value = 'username and password are required'
-    createAccountSuccess.value = ''
+async function submitChangePassword(): Promise<void> {
+  if (changingPassword.value) {
     return
   }
 
-  createAccountError.value = ''
-  createAccountSuccess.value = ''
-  creatingAccount.value = true
+  const currentPasswordValue = currentPassword.value
+  const newPasswordValue = newPassword.value
+  if (!currentPasswordValue.trim() || !newPasswordValue.trim()) {
+    changePasswordError.value = 'current password and new password are required'
+    changePasswordSuccess.value = ''
+    return
+  }
+
+  changingPassword.value = true
+  changePasswordError.value = ''
+  changePasswordSuccess.value = ''
+
   try {
-    const payload = await createAccountAPI(username, password)
-    createAccountUsername.value = ''
-    createAccountPassword.value = ''
-    createAccountSuccess.value = `Created account ${payload.account.username}`
+    await changePasswordAPI(currentPasswordValue, newPasswordValue)
+    currentPassword.value = ''
+    newPassword.value = ''
+    changePasswordSuccess.value = 'Password updated successfully.'
   } catch (error) {
-    createAccountError.value = error instanceof Error ? error.message : 'Failed to create account.'
+    if (isUnauthorizedError(error)) {
+      await redirectToLogin(() => {
+        closeModal()
+      })
+      return
+    }
+    changePasswordError.value =
+      error instanceof Error ? error.message : 'Failed to change password.'
   } finally {
-    creatingAccount.value = false
+    changingPassword.value = false
   }
 }
 
@@ -50,13 +62,13 @@ function closeModal(): void {
     @click.self="closeModal"
   >
     <div
-      class="account-modal w-[min(480px,100%)] rounded-lg border border-stroke bg-surface shadow-modal flex flex-col"
+      class="password-modal w-[min(480px,100%)] rounded-lg border border-stroke bg-surface shadow-modal flex flex-col"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="account-modal-title"
+      aria-labelledby="change-password-modal-title"
     >
       <div class="flex items-center justify-between px-6 py-5 border-b border-stroke">
-        <h3 id="account-modal-title" class="m-0 text-xl font-semibold">Create Account</h3>
+        <h3 id="change-password-modal-title" class="m-0 text-xl font-semibold">Change Password</h3>
         <button
           type="button"
           class="rounded-md px-3 py-1.5 text-[13px] font-medium h-8 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
@@ -68,26 +80,27 @@ function closeModal(): void {
 
       <div class="p-6 grid gap-5">
         <p class="m-0 text-secondary text-sm leading-normal">
-          Registration is enabled. New accounts are always non-admin.
+          Update your console account password. Existing sessions for this account will be rotated.
         </p>
 
-        <form class="account-form grid gap-4" @submit.prevent="submitCreateAccount">
+        <form id="change-password-form" class="password-form grid gap-4" @submit.prevent="submitChangePassword">
           <label class="grid gap-2">
-            <span class="text-primary text-sm font-medium">Username</span>
+            <span class="text-primary text-sm font-medium">Current Password</span>
             <input
-              v-model="createAccountUsername"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
+              id="current-password"
+              v-model="currentPassword"
+              type="password"
+              autocomplete="current-password"
               required
               class="border border-stroke rounded-default px-3 py-2.5 text-sm font-[inherit] transition-[border-color,box-shadow] duration-200 outline-none focus:border-secondary focus:shadow-[0_0_0_1px_var(--color-secondary)]"
             />
           </label>
 
           <label class="grid gap-2">
-            <span class="text-primary text-sm font-medium">Password</span>
+            <span class="text-primary text-sm font-medium">New Password</span>
             <input
-              v-model="createAccountPassword"
+              id="new-password"
+              v-model="newPassword"
               type="password"
               autocomplete="new-password"
               required
@@ -96,16 +109,16 @@ function closeModal(): void {
           </label>
 
           <p
-            v-if="createAccountError"
+            v-if="changePasswordError"
             class="m-0 border border-[#fca5a5] rounded-default bg-[#fef2f2] text-offline px-3 py-2.5 text-sm"
           >
-            {{ createAccountError }}
+            {{ changePasswordError }}
           </p>
           <p
-            v-if="createAccountSuccess"
+            v-if="changePasswordSuccess"
             class="m-0 border border-[#86efac] rounded-default bg-[#f0fdf4] text-[#166534] px-3 py-2.5 text-sm"
           >
-            {{ createAccountSuccess }}
+            {{ changePasswordSuccess }}
           </p>
         </form>
       </div>
@@ -116,18 +129,18 @@ function closeModal(): void {
         <button
           type="button"
           class="rounded-md px-3 py-1.5 text-[13px] font-medium h-8 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="creatingAccount"
+          :disabled="changingPassword"
           @click="closeModal"
         >
           Cancel
         </button>
         <button
-          type="button"
+          type="submit"
+          form="change-password-form"
           class="rounded-md px-3 py-1.5 text-[13px] font-medium h-8 inline-flex items-center justify-center text-white bg-accent border border-accent transition-all duration-200 hover:not-disabled:bg-[#333] hover:not-disabled:border-[#333] disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="creatingAccount"
-          @click="submitCreateAccount"
+          :disabled="changingPassword"
         >
-          {{ creatingAccount ? 'Creating...' : 'Create Account' }}
+          {{ changingPassword ? 'Saving...' : 'Save Password' }}
         </button>
       </div>
     </div>

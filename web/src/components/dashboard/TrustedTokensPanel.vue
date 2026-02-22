@@ -263,7 +263,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="border border-stroke rounded-lg bg-surface shadow-card p-6 animate-[rise-in_540ms_ease-out]">
+  <section
+    class="token-panel border border-stroke rounded-lg bg-surface shadow-card p-6 animate-[rise-in_540ms_ease-out]"
+  >
     <div class="flex items-start justify-between gap-4 max-[700px]:flex-col">
       <div>
         <h2 class="m-0 text-lg font-semibold">Trusted Tokens</h2>
@@ -289,7 +291,10 @@ onBeforeUnmount(() => {
 
     <transition name="expand">
       <div v-show="!collapsed" class="overflow-hidden pt-5">
-        <p v-if="tokens.length === 0" class="m-0 text-secondary text-sm bg-surface-soft px-4 py-3 rounded-default border border-dashed border-stroke">
+        <p
+          v-if="tokens.length === 0"
+          class="m-0 text-secondary text-sm bg-surface-soft px-4 py-3 rounded-default border border-dashed border-stroke"
+        >
           No tokens configured. All MCP and protected HTTP endpoints are currently rejected.
         </p>
 
@@ -303,11 +308,17 @@ onBeforeUnmount(() => {
               <p class="m-0 mb-1 text-[15px] font-semibold text-primary">{{ item.name }}</p>
               <p class="m-0 flex items-center gap-3 text-primary text-[13px]">
                 <span class="w-16 text-secondary text-[13px] font-medium">ID</span>
-                <code class="font-mono bg-surface-soft border border-stroke rounded-default px-1.5 py-0.5 text-xs break-all whitespace-pre-wrap">{{ item.id }}</code>
+                <code
+                  class="font-mono bg-surface-soft border border-stroke rounded-default px-1.5 py-0.5 text-xs break-all whitespace-pre-wrap"
+                  >{{ item.id }}</code
+                >
               </p>
               <p class="m-0 flex items-center gap-3 text-primary text-[13px]">
                 <span class="w-16 text-secondary text-[13px] font-medium">Masked</span>
-                <code class="font-mono bg-surface-soft border border-stroke rounded-default px-1.5 py-0.5 text-xs break-all whitespace-pre-wrap">{{ item.token_masked }}</code>
+                <code
+                  class="font-mono bg-surface-soft border border-stroke rounded-default px-1.5 py-0.5 text-xs break-all whitespace-pre-wrap"
+                  >{{ item.token_masked }}</code
+                >
               </p>
               <p class="m-0 flex items-center gap-3 text-primary text-[13px]">
                 <span class="w-16 text-secondary text-[13px] font-medium">Created</span>
@@ -315,7 +326,7 @@ onBeforeUnmount(() => {
               </p>
             </div>
 
-            <div>
+            <div class="token-actions">
               <button
                 type="button"
                 class="rounded-md px-3 py-1.5 text-[13px] font-medium h-8 inline-flex items-center justify-center text-offline bg-white border border-[#fca5a5] transition-all duration-200 hover:not-disabled:bg-[#fef2f2] hover:not-disabled:border-[#f87171] disabled:cursor-not-allowed disabled:opacity-50"
@@ -331,9 +342,13 @@ onBeforeUnmount(() => {
     </transition>
   </section>
 
-  <div v-if="showCreateModal" class="fixed inset-0 z-1000 bg-black/40 backdrop-blur-xs flex items-center justify-center p-6" @click.self="closeCreateModal">
+  <div
+    v-if="showCreateModal"
+    class="fixed inset-0 z-1000 bg-black/40 backdrop-blur-xs flex items-center justify-center p-6"
+    @click.self="closeCreateModal"
+  >
     <div
-      class="w-[min(560px,100%)] rounded-lg border border-stroke bg-surface shadow-modal flex flex-col"
+      class="token-modal w-[min(560px,100%)] rounded-lg border border-stroke bg-surface shadow-modal flex flex-col"
       role="dialog"
       aria-modal="true"
       aria-labelledby="trusted-token-dialog-title"
@@ -353,8 +368,11 @@ onBeforeUnmount(() => {
 
       <div class="p-6 grid gap-5">
         <template v-if="!createdToken">
-          <p class="m-0 text-secondary text-sm leading-normal">The plaintext token is shown only once after creation and cannot be viewed again after closing this dialog.</p>
-          <form class="grid gap-4" @submit.prevent="submitCreateToken">
+          <p class="m-0 text-secondary text-sm leading-normal">
+            The plaintext token is shown only once after creation and cannot be viewed again after
+            closing this dialog.
+          </p>
+          <form class="token-modal-form grid gap-4" @submit.prevent="submitCreateToken">
             <label class="grid gap-2">
               <span class="text-primary text-sm font-medium">Name</span>
               <input
@@ -367,9 +385,16 @@ onBeforeUnmount(() => {
               />
             </label>
 
-            <p v-if="modalError" class="m-0 border border-[#fca5a5] rounded-default bg-[#fef2f2] text-offline px-3 py-2.5 text-sm">{{ modalError }}</p>
+            <p
+              v-if="modalError"
+              class="m-0 border border-[#fca5a5] rounded-default bg-[#fef2f2] text-offline px-3 py-2.5 text-sm"
+            >
+              {{ modalError }}
+            </p>
 
-            <div class="flex justify-end gap-3 pt-5 max-[700px]:flex-col-reverse max-[700px]:[&>button]:w-full">
+            <div
+              class="flex justify-end gap-3 pt-5 max-[700px]:flex-col-reverse max-[700px]:[&>button]:w-full"
+            >
               <button
                 type="button"
                 class="rounded-md px-3 py-1.5 text-[13px] font-medium h-8 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
@@ -390,12 +415,26 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else>
-          <p class="m-0 text-secondary text-sm leading-normal">This is the only time the plaintext token is shown. Copy and store it securely now.</p>
-          <code class="block border border-stroke rounded-default bg-black text-white p-4 font-mono text-[13px] leading-[1.6] break-all whitespace-pre-wrap">{{ createdToken.token }}</code>
+          <p class="m-0 text-secondary text-sm leading-normal">
+            This is the only time the plaintext token is shown. Copy and store it securely now.
+          </p>
+          <code
+            class="block border border-stroke rounded-default bg-black text-white p-4 font-mono text-[13px] leading-[1.6] break-all whitespace-pre-wrap"
+            >{{ createdToken.token }}</code
+          >
           <div class="grid gap-3">
-            <p class="m-0 flex items-start gap-3 text-sm break-all"><span class="shrink-0 w-16 text-secondary text-[13px] font-medium">Name</span>{{ createdToken.name }}</p>
-            <p class="m-0 flex items-start gap-3 text-sm break-all"><span class="shrink-0 w-16 text-secondary text-[13px] font-medium">ID</span>{{ createdToken.id }}</p>
-            <p class="m-0 flex items-start gap-3 text-sm break-all"><span class="shrink-0 w-16 text-secondary text-[13px] font-medium">Masked</span>{{ createdToken.token_masked }}</p>
+            <p class="m-0 flex items-start gap-3 text-sm break-all">
+              <span class="shrink-0 w-16 text-secondary text-[13px] font-medium">Name</span
+              >{{ createdToken.name }}
+            </p>
+            <p class="m-0 flex items-start gap-3 text-sm break-all">
+              <span class="shrink-0 w-16 text-secondary text-[13px] font-medium">ID</span
+              >{{ createdToken.id }}
+            </p>
+            <p class="m-0 flex items-start gap-3 text-sm break-all">
+              <span class="shrink-0 w-16 text-secondary text-[13px] font-medium">Masked</span
+              >{{ createdToken.token_masked }}
+            </p>
           </div>
 
           <section class="grid gap-3">
@@ -404,15 +443,18 @@ onBeforeUnmount(() => {
               <li
                 v-for="snippet in tokenUsageSnippets"
                 :key="snippet.key"
-                class="border border-stroke rounded-default bg-surface-soft overflow-hidden"
+                class="token-usage-item border border-stroke rounded-default bg-surface-soft overflow-hidden"
               >
                 <button
                   type="button"
-                  class="w-full border-0 bg-transparent px-3 py-2.5 flex items-center justify-between gap-3 cursor-pointer transition-all duration-200 hover:bg-[#efefef] max-[700px]:items-start"
+                  class="token-usage-trigger w-full border-0 bg-transparent px-3 py-2.5 flex items-center justify-between gap-3 cursor-pointer transition-all duration-200 hover:bg-[#efefef] max-[700px]:items-start"
                   @click="toggleUsageSnippet(snippet.key)"
                 >
                   <span class="inline-flex items-center gap-2 min-w-0">
-                    <span class="inline-flex items-center justify-center px-2 py-1 rounded-default border border-stroke bg-surface font-mono text-[11px] text-secondary lowercase">{{ snippet.label }}</span>
+                    <span
+                      class="token-usage-label inline-flex items-center justify-center px-2 py-1 rounded-default border border-stroke bg-surface font-mono text-[11px] text-secondary lowercase"
+                      >{{ snippet.label }}</span
+                    >
                     <span class="text-secondary text-xs">{{ snippet.kind }}</span>
                   </span>
                   <span class="text-secondary text-xs font-medium">
@@ -421,8 +463,14 @@ onBeforeUnmount(() => {
                 </button>
 
                 <transition name="expand">
-                  <div v-show="expandedUsageKey === snippet.key" class="border-t border-stroke p-3 grid gap-2.5">
-                    <code class="block border border-stroke rounded-default bg-black text-white p-3 font-mono text-xs leading-[1.55] break-all whitespace-pre-wrap">{{ snippet.value }}</code>
+                  <div
+                    v-show="expandedUsageKey === snippet.key"
+                    class="border-t border-stroke p-3 grid gap-2.5"
+                  >
+                    <code
+                      class="token-usage-value block border border-stroke rounded-default bg-black text-white p-3 font-mono text-xs leading-[1.55] break-all whitespace-pre-wrap"
+                      >{{ snippet.value }}</code
+                    >
                     <div class="flex justify-end">
                       <button
                         type="button"
@@ -439,7 +487,9 @@ onBeforeUnmount(() => {
             </ul>
           </section>
 
-          <div class="flex justify-end gap-3 pt-5 max-[700px]:flex-col-reverse max-[700px]:[&>button]:w-full">
+          <div
+            class="flex justify-end gap-3 pt-5 max-[700px]:flex-col-reverse max-[700px]:[&>button]:w-full"
+          >
             <button
               type="button"
               class="rounded-md px-3 py-1.5 text-[13px] font-medium h-8 inline-flex items-center justify-center text-primary bg-surface border border-stroke transition-all duration-200 hover:not-disabled:border-stroke-hover hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"

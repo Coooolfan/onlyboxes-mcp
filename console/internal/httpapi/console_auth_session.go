@@ -56,6 +56,22 @@ func (a *ConsoleAuth) deleteSession(sessionID string) {
 	a.sessionMu.Unlock()
 }
 
+func (a *ConsoleAuth) deleteSessionsByAccountID(accountID string) {
+	normalizedAccountID := strings.TrimSpace(accountID)
+	if normalizedAccountID == "" {
+		return
+	}
+
+	a.sessionMu.Lock()
+	defer a.sessionMu.Unlock()
+
+	for sessionID, sessionState := range a.sessions {
+		if strings.TrimSpace(sessionState.Account.AccountID) == normalizedAccountID {
+			delete(a.sessions, sessionID)
+		}
+	}
+}
+
 func (a *ConsoleAuth) setSessionCookie(c *gin.Context, sessionID string, expiresAt time.Time) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     dashboardSessionCookieName,

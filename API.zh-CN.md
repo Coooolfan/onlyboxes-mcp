@@ -22,7 +22,9 @@ Onlyboxes 有两套鉴权路径：
 - 用于：
   - `/api/v1/console/session`
   - `/api/v1/console/logout`
+  - `/api/v1/console/password`
   - `/api/v1/console/register`
+  - `/api/v1/console/accounts*`
   - `/api/v1/console/tokens*`
   - `/api/v1/workers*`（管理员路由）
 - 会话有效期为 12 小时（内存态）；console 重启后会话全部失效。
@@ -140,6 +142,77 @@ Onlyboxes 有两套鉴权路径：
 - `400` 用户名为空、用户名长度 > 64、或密码为空
 - `409` 用户名冲突（不区分大小写）
 - `500` 数据库或内部错误
+
+### 3.5 修改当前账号密码
+
+`POST /api/v1/console/password`
+
+请求：
+
+```json
+{
+  "current_password": "old-password",
+  "new_password": "new-password"
+}
+```
+
+响应：
+
+- `204` 修改成功
+- `400` JSON 结构非法、`current_password` 缺失或 `new_password` 缺失
+- `401` 当前密码错误
+- `500` 内部错误
+
+说明：
+
+- 该接口需要控制台会话鉴权。
+- 密码更新后会轮换该账号的活动会话。
+
+### 3.6 查询账号列表（仅管理员）
+
+`GET /api/v1/console/accounts?page=1&page_size=20`
+
+查询参数：
+
+- `page`：正整数，默认 `1`
+- `page_size`：正整数，默认 `20`，最大 `100`
+
+成功 `200`：
+
+```json
+{
+  "items": [
+    {
+      "account_id": "acc_xxx",
+      "username": "admin",
+      "is_admin": true,
+      "created_at": "2026-02-21T00:00:00Z",
+      "updated_at": "2026-02-21T00:00:00Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+错误：
+
+- `400` 查询参数非法
+- `403` 当前账号不是管理员
+- `500` 数据库或内部错误
+
+### 3.7 删除账号（仅管理员）
+
+`DELETE /api/v1/console/accounts/:account_id`
+
+响应：
+
+- `204` 删除成功
+- `403` 禁止删除当前登录账号
+- `403` 禁止删除管理员账号
+- `404` 账号不存在
+- `500` 内部错误
 
 ## 4. Token 管理 API（控制台会话鉴权）
 

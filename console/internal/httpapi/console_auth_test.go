@@ -392,6 +392,236 @@ func TestConsoleAuthRegisterDisabled(t *testing.T) {
 	}
 }
 
+func TestConsoleAuthChangePasswordLifecycle(t *testing.T) {
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
+	auth := newTestConsoleAuth(t)
+	router := NewRouter(handler, auth, newTestMCPAuth())
+	originalCookie := loginSessionCookie(t, router)
+
+	changeReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/password", strings.NewReader(`{"current_password":"password-test","new_password":"password-next"}`))
+	changeReq.Header.Set("Content-Type", "application/json")
+	changeReq.AddCookie(originalCookie)
+	changeRec := httptest.NewRecorder()
+	router.ServeHTTP(changeRec, changeReq)
+	if changeRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for password change, got %d body=%s", changeRec.Code, changeRec.Body.String())
+	}
+
+	var renewedCookie *http.Cookie
+	for _, cookie := range changeRec.Result().Cookies() {
+		if cookie.Name == dashboardSessionCookieName {
+			renewedCookie = cookie
+			break
+		}
+	}
+	if renewedCookie == nil {
+		t.Fatalf("expected renewed session cookie after password change")
+	}
+	if renewedCookie.Value == originalCookie.Value {
+		t.Fatalf("expected renewed session id to differ from original")
+	}
+
+	oldSessionReq := httptest.NewRequest(http.MethodGet, "/api/v1/workers", nil)
+	oldSessionReq.AddCookie(originalCookie)
+	oldSessionRec := httptest.NewRecorder()
+	router.ServeHTTP(oldSessionRec, oldSessionReq)
+	if oldSessionRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected old session to be invalidated, got %d body=%s", oldSessionRec.Code, oldSessionRec.Body.String())
+	}
+
+	oldPasswordReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/login", strings.NewReader(`{"username":"admin-test","password":"password-test"}`))
+	oldPasswordReq.Header.Set("Content-Type", "application/json")
+	oldPasswordRec := httptest.NewRecorder()
+	router.ServeHTTP(oldPasswordRec, oldPasswordReq)
+	if oldPasswordRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected old password login to fail, got %d body=%s", oldPasswordRec.Code, oldPasswordRec.Body.String())
+	}
+
+	newPasswordCookie := loginSessionCookieFor(t, router, "admin-test", "password-next")
+	newSessionReq := httptest.NewRequest(http.MethodGet, "/api/v1/workers", nil)
+	newSessionReq.AddCookie(newPasswordCookie)
+	newSessionRec := httptest.NewRecorder()
+	router.ServeHTTP(newSessionRec, newSessionReq)
+	if newSessionRec.Code != http.StatusOK {
+		t.Fatalf("expected new password session to work, got %d body=%s", newSessionRec.Code, newSessionRec.Body.String())
+	}
+}
+
+func TestConsoleAuthChangePasswordValidationAndCurrentPassword(t *testing.T) {
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
+	auth := newTestConsoleAuth(t)
+	router := NewRouter(handler, auth, newTestMCPAuth())
+	cookie := loginSessionCookie(t, router)
+
+	missingCurrentReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/password", strings.NewReader(`{"new_password":"password-next"}`))
+	missingCurrentReq.Header.Set("Content-Type", "application/json")
+	missingCurrentReq.AddCookie(cookie)
+	missingCurrentRec := httptest.NewRecorder()
+	router.ServeHTTP(missingCurrentRec, missingCurrentReq)
+	if missingCurrentRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing current password, got %d body=%s", missingCurrentRec.Code, missingCurrentRec.Body.String())
+	}
+	if !strings.Contains(missingCurrentRec.Body.String(), errAccountCurrentPasswordRequired.Error()) {
+		t.Fatalf("expected current password required message, got %s", missingCurrentRec.Body.String())
+	}
+
+	invalidCurrentReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/password", strings.NewReader(`{"current_password":"wrong-pass","new_password":"password-next"}`))
+	invalidCurrentReq.Header.Set("Content-Type", "application/json")
+	invalidCurrentReq.AddCookie(cookie)
+	invalidCurrentRec := httptest.NewRecorder()
+	router.ServeHTTP(invalidCurrentRec, invalidCurrentReq)
+	if invalidCurrentRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for invalid current password, got %d body=%s", invalidCurrentRec.Code, invalidCurrentRec.Body.String())
+	}
+	if !strings.Contains(invalidCurrentRec.Body.String(), errAccountCurrentPasswordInvalid.Error()) {
+		t.Fatalf("expected invalid current password message, got %s", invalidCurrentRec.Body.String())
+	}
+}
+
+func TestConsoleAuthListAccountsAdminOnlyAndPagination(t *testing.T) {
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
+	auth := newTestConsoleAuthWithRegistration(t, true)
+	router := NewRouter(handler, auth, newTestMCPAuth())
+	adminCookie := loginSessionCookie(t, router)
+
+	for _, username := range []string{"member-a", "member-b"} {
+		registerReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/register", strings.NewReader(`{"username":"`+username+`","password":"member-pass"}`))
+		registerReq.Header.Set("Content-Type", "application/json")
+		registerReq.AddCookie(adminCookie)
+		registerRec := httptest.NewRecorder()
+		router.ServeHTTP(registerRec, registerReq)
+		if registerRec.Code != http.StatusCreated {
+			t.Fatalf("expected register success for %q, got %d body=%s", username, registerRec.Code, registerRec.Body.String())
+		}
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/console/accounts?page=1&page_size=2", nil)
+	listReq.AddCookie(adminCookie)
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for account list, got %d body=%s", listRec.Code, listRec.Body.String())
+	}
+
+	var payload accountListResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode account list payload: %v", err)
+	}
+	if payload.Total != 3 {
+		t.Fatalf("expected total=3 accounts, got %d", payload.Total)
+	}
+	if payload.Page != 1 || payload.PageSize != 2 {
+		t.Fatalf("unexpected pagination payload: page=%d page_size=%d", payload.Page, payload.PageSize)
+	}
+	if len(payload.Items) != 2 {
+		t.Fatalf("expected 2 items on first page, got %d", len(payload.Items))
+	}
+
+	nonAdminCookie := loginSessionCookieFor(t, router, "member-a", "member-pass")
+	nonAdminListReq := httptest.NewRequest(http.MethodGet, "/api/v1/console/accounts", nil)
+	nonAdminListReq.AddCookie(nonAdminCookie)
+	nonAdminListRec := httptest.NewRecorder()
+	router.ServeHTTP(nonAdminListRec, nonAdminListReq)
+	if nonAdminListRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin account list, got %d body=%s", nonAdminListRec.Code, nonAdminListRec.Body.String())
+	}
+}
+
+func TestConsoleAuthDeleteAccountGuardsAndCascade(t *testing.T) {
+	ctx := context.Background()
+	db := openTestAuthDB(t)
+	defer func() {
+		_ = db.Close()
+	}()
+	seedTestAccount(db.Queries, testDashboardAccountID, testDashboardUsername, testDashboardPassword, true)
+	seedTestAccount(db.Queries, "acc-admin-second", "admin-second", "admin-second-pass", true)
+
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
+	auth := NewConsoleAuth(db.Queries, true)
+	mcpAuth := NewMCPAuthWithPersistence(db)
+	router := NewRouter(handler, auth, mcpAuth)
+	adminCookie := loginSessionCookie(t, router)
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/register", strings.NewReader(`{"username":"member-to-delete","password":"member-pass"}`))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerReq.AddCookie(adminCookie)
+	registerRec := httptest.NewRecorder()
+	router.ServeHTTP(registerRec, registerReq)
+	if registerRec.Code != http.StatusCreated {
+		t.Fatalf("expected register success, got %d body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	var registerPayload registerAccountResponse
+	if err := json.Unmarshal(registerRec.Body.Bytes(), &registerPayload); err != nil {
+		t.Fatalf("decode register payload: %v", err)
+	}
+	memberID := registerPayload.Account.AccountID
+	if strings.TrimSpace(memberID) == "" {
+		t.Fatalf("expected member account_id")
+	}
+
+	memberToken := "member-token-delete-case"
+	if _, _, err := mcpAuth.createToken(ctx, memberID, "member-token", &memberToken); err != nil {
+		t.Fatalf("seed member token failed: %v", err)
+	}
+	memberCookie := loginSessionCookieFor(t, router, "member-to-delete", "member-pass")
+
+	deleteSelfReq := httptest.NewRequest(http.MethodDelete, "/api/v1/console/accounts/"+testDashboardAccountID, nil)
+	deleteSelfReq.AddCookie(adminCookie)
+	deleteSelfRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteSelfRec, deleteSelfReq)
+	if deleteSelfRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for deleting self, got %d body=%s", deleteSelfRec.Code, deleteSelfRec.Body.String())
+	}
+
+	deleteAdminReq := httptest.NewRequest(http.MethodDelete, "/api/v1/console/accounts/acc-admin-second", nil)
+	deleteAdminReq.AddCookie(adminCookie)
+	deleteAdminRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteAdminRec, deleteAdminReq)
+	if deleteAdminRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for deleting admin account, got %d body=%s", deleteAdminRec.Code, deleteAdminRec.Body.String())
+	}
+
+	deleteMissingReq := httptest.NewRequest(http.MethodDelete, "/api/v1/console/accounts/acc-missing", nil)
+	deleteMissingReq.AddCookie(adminCookie)
+	deleteMissingRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteMissingRec, deleteMissingReq)
+	if deleteMissingRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for deleting missing account, got %d body=%s", deleteMissingRec.Code, deleteMissingRec.Body.String())
+	}
+
+	deleteMemberReq := httptest.NewRequest(http.MethodDelete, "/api/v1/console/accounts/"+memberID, nil)
+	deleteMemberReq.AddCookie(adminCookie)
+	deleteMemberRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteMemberRec, deleteMemberReq)
+	if deleteMemberRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for deleting member account, got %d body=%s", deleteMemberRec.Code, deleteMemberRec.Body.String())
+	}
+
+	memberSessionReq := httptest.NewRequest(http.MethodGet, "/api/v1/console/tokens", nil)
+	memberSessionReq.AddCookie(memberCookie)
+	memberSessionRec := httptest.NewRecorder()
+	router.ServeHTTP(memberSessionRec, memberSessionReq)
+	if memberSessionRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected deleted member session to be invalidated, got %d body=%s", memberSessionRec.Code, memberSessionRec.Body.String())
+	}
+
+	memberLoginReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/login", strings.NewReader(`{"username":"member-to-delete","password":"member-pass"}`))
+	memberLoginReq.Header.Set("Content-Type", "application/json")
+	memberLoginRec := httptest.NewRecorder()
+	router.ServeHTTP(memberLoginRec, memberLoginReq)
+	if memberLoginRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected deleted member login to fail, got %d body=%s", memberLoginRec.Code, memberLoginRec.Body.String())
+	}
+
+	remainingTokens, err := db.Queries.ListTrustedTokensByAccount(ctx, memberID)
+	if err != nil {
+		t.Fatalf("list member tokens after delete: %v", err)
+	}
+	if len(remainingTokens) != 0 {
+		t.Fatalf("expected member tokens to be deleted by cascade, got %d", len(remainingTokens))
+	}
+}
+
 func loginSessionCookieFor(t *testing.T, router http.Handler, username string, password string) *http.Cookie {
 	t.Helper()
 	body, err := json.Marshal(loginRequest{Username: username, Password: password})

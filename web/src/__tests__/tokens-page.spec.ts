@@ -139,9 +139,7 @@ describe('Tokens Page', () => {
       await flushPromises()
       expect(writeText).toHaveBeenCalledTimes(1)
       const copiedClaudeCommand = String(writeText.mock.calls[0]?.[0] ?? '')
-      expect(copiedClaudeCommand).toContain(
-        'claude mcp add --transport http onlyboxes',
-      )
+      expect(copiedClaudeCommand).toContain('claude mcp add --transport http onlyboxes')
       expect(copiedClaudeCommand).toContain('Authorization: Bearer obx_plaintext_once')
       expect(copiedClaudeCommand).not.toContain('X-Onlyboxes-Token')
 
@@ -233,6 +231,59 @@ describe('Tokens Page', () => {
       expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/v1/console/logout')).toBe(
         true,
       )
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('changes password from tokens page modal', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = String(init?.method ?? 'GET').toUpperCase()
+      if (url === '/api/v1/console/session') {
+        return jsonResponse(memberSessionPayload)
+      }
+      if (url === '/api/v1/console/tokens') {
+        return jsonResponse(defaultTokensPayload())
+      }
+      if (url === '/api/v1/console/password' && method === 'POST') {
+        return noContentResponse()
+      }
+      throw new Error(`unexpected url: ${url}, method=${method}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = await mountApp('/tokens')
+    try {
+      await waitForRoute('/tokens', 30)
+      const changePasswordBtn = wrapper
+        .findAll('button')
+        .find((button) => button.text() === 'Change Password')
+      expect(changePasswordBtn).toBeTruthy()
+      await changePasswordBtn?.trigger('click')
+      await flushPromises()
+
+      const modal = wrapper.find('.password-modal')
+      expect(modal.exists()).toBe(true)
+      await modal.get('#current-password').setValue('member-pass')
+      await modal.get('#new-password').setValue('member-pass-next')
+      await modal.get('form.password-form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('Password updated successfully.')
+      const passwordCall = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/v1/console/password' &&
+          String((init as RequestInit | undefined)?.method).toUpperCase() === 'POST',
+      )
+      expect(passwordCall).toBeTruthy()
+      const passwordPayload = JSON.parse(
+        String((passwordCall?.[1] as RequestInit | undefined)?.body),
+      )
+      expect(passwordPayload).toEqual({
+        current_password: 'member-pass',
+        new_password: 'member-pass-next',
+      })
     } finally {
       wrapper.unmount()
     }
