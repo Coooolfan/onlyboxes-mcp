@@ -5,6 +5,15 @@
 Onlyboxes 是一个面向个人与小型团队的自托管代码执行沙箱平台。
 系统采用控制面（`console`）与执行面（`worker-docker`）分离架构，并同时提供 REST API 与 MCP 接口。
 
+## 核心能力
+
+- 自托管控制节点，内置 Web 控制台（由 `console` 提供）
+- Worker 凭据按需创建，`WORKER_SECRET` 仅一次性下发
+- 账号维度的 token 管理，用于执行 API 与 MCP 鉴权
+- 能力路由执行（`echo`、`pythonExec`、`terminalExec`、`readImage`）
+- 任务生命周期接口，支持同步/异步执行（`/api/v1/tasks`）
+- SQLite 持久化账号、token、worker、task 元数据
+
 > [!WARNING]
 > 当前版本中，console gRPC 不提供内建 TLS/mTLS。
 >
@@ -15,15 +24,6 @@ Onlyboxes 是一个面向个人与小型团队的自托管代码执行沙箱平�
 ## 架构
 
 ![架构](static/architecture.zh-CN.svg)
-
-## 核心能力
-
-- 自托管控制节点，内置 Web 控制台（由 `console` 提供）
-- Worker 凭据按需创建，`WORKER_SECRET` 仅一次性下发
-- 账号维度的 token 管理，用于执行 API 与 MCP 鉴权
-- 能力路由执行（`echo`、`pythonExec`、`terminalExec`、`readImage`）
-- 任务生命周期接口，支持同步/异步执行（`/api/v1/tasks`）
-- SQLite 持久化账号、token、worker、task 元数据
 
 ## 快速开始（自托管）
 

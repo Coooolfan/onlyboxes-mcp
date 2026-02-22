@@ -5,6 +5,15 @@
 Onlyboxes is a self-hosted code execution sandbox platform for individuals and small teams.
 It uses a control-plane (`console`) and execution-plane (`worker-docker`) architecture, and exposes both REST APIs and MCP tools.
 
+## Key Features
+
+- Self-hosted control plane with web dashboard (embedded in `console`)
+- Worker provisioning with one-time `WORKER_SECRET` delivery
+- Account-based token management for execution APIs and MCP
+- Capability-based execution (`echo`, `pythonExec`, `terminalExec`, `readImage`)
+- Task lifecycle API for sync/async execution (`/api/v1/tasks`)
+- SQLite persistence for accounts, tokens, workers, and tasks
+
 > [!WARNING]
 > In the current release, console gRPC does not provide built-in TLS/mTLS.
 >
@@ -15,15 +24,6 @@ It uses a control-plane (`console`) and execution-plane (`worker-docker`) archit
 ## Architecture
 
 ![Architecture](static/architecture.svg)
-
-## Key Features
-
-- Self-hosted control plane with web dashboard (embedded in `console`)
-- Worker provisioning with one-time `WORKER_SECRET` delivery
-- Account-based token management for execution APIs and MCP
-- Capability-based execution (`echo`, `pythonExec`, `terminalExec`, `readImage`)
-- Task lifecycle API for sync/async execution (`/api/v1/tasks`)
-- SQLite persistence for accounts, tokens, workers, and tasks
 
 ## Quick Start (Self-Hosted)
 
