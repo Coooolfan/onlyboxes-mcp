@@ -11,7 +11,7 @@ It uses a control-plane (`console`) and execution-plane (`worker`) architecture,
 - Self-hosted all components: control node (`console`) + worker nodes (`worker`)
 - Separated control and execution planes:
   - Workers support **horizontal scaling**
-  - Workers support **heterogeneous development** in multiple languages
+  - Workers support multi-language **heterogeneous** implementations
   - Workers support **multiple runtimes**
 - Full account system: resource isolation (stateful containers, sessions) between accounts
 - MCP tools:
