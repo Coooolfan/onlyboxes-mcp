@@ -3,55 +3,68 @@
 [简体中文](README.zh-CN.md)
 
 Onlyboxes is a self-hosted code execution sandbox platform for individuals and small teams.
-It uses a control-plane (`console`) and execution-plane (`worker-docker`) architecture, and exposes both REST APIs and MCP tools.
+
+It uses a control-plane (`console`) and execution-plane (`worker`) architecture, and exposes both REST APIs and MCP tools.
 
 ## Key Features
 
-- Self-hosted control plane with web dashboard (embedded in `console`)
-- Worker provisioning with one-time `WORKER_SECRET` delivery
-- Account-based token management for execution APIs and MCP
-- Capability-based execution (`echo`, `pythonExec`, `terminalExec`, `readImage`)
-- Task lifecycle API for sync/async execution (`/api/v1/tasks`)
-- SQLite persistence for accounts, tokens, workers, and tasks
+- Self-hosted all components: control node (`console`) + worker nodes (`worker`)
+- Separated control and execution planes:
+  - Workers support **horizontal scaling**
+  - Workers support **heterogeneous development** in multiple languages
+  - Workers support **multiple runtimes**
+- Full account system: resource isolation (stateful containers, sessions) between accounts
+- MCP tools:
+  - `pythonExec`: Python code execution
+  - `terminalExec`: stateful terminal sessions
+  - `readImage`: model-readable images
+- REST API: all MCP tools also available via HTTP + async task API
 
 > [!WARNING]
-> In the current release, console gRPC does not provide built-in TLS/mTLS.
 >
-> `worker-docker` rejects insecure console endpoints by default; plaintext is allowed only when `WORKER_CONSOLE_INSECURE=true` is explicitly set.
+> In the current release, console (gRPC + HTTP) does not provide built-in TLS/mTLS.
+>
+> `worker` rejects insecure console endpoints by default; plaintext is allowed only when `WORKER_CONSOLE_INSECURE=true` is explicitly set.
 >
 > Put both console HTTP (`:8089`) and gRPC (`:50051`) endpoints behind your reverse proxy/gateway and enforce TLS for external traffic.
 
 ## Architecture
 
-![Architecture](static/architecture.svg)
+![Architecture](static/architecture.svg#gh-light-mode-only)
+![Architecture](static/architecture-dark.svg#gh-dark-mode-only)
 
 ## Quick Start (Self-Hosted)
 
 ### 1) Prerequisites
 
-- Docker Engine (required by `worker-docker` runtime)
-- Go `1.24+` (if you run worker from source)
+- Control node:
+  - Docker Engine (no dependencies if deployed via Docker)
+- Worker node:
+  - Docker Engine (required by `worker-docker`)
 
 ### 2) Start the console service
 
-1. Edit `docker/docker-compose.yml` and replace at least:
+1. Download the `docker-compose.yml` file:
+
+    ```bash
+    mkdir -p onlyboxes-console && cd onlyboxes-console
+    wget https://raw.githubusercontent.com/Coooolfan/onlyboxes/refs/heads/main/docker/docker-compose.yml
+
+    ```
+
+2. Edit `docker-compose.yml` and replace at least:
    - `CONSOLE_HASH_KEY`
    - `CONSOLE_DASHBOARD_PASSWORD`
-2. Start console:
+3. Start console:
 
-```bash
-docker compose -f docker/docker-compose.yml up -d
-```
+    ```bash
+    docker compose up -d
+    ```
 
-View live logs:
+Default endpoints:
 
-```bash
-docker compose -f docker/docker-compose.yml logs -f console
-```
-
-Console endpoints:
-
-- Dashboard/API: `http://127.0.0.1:8089`
+- Console Web UI / HTTP REST API / MCP endpoint: `http://127.0.0.1:8089`
+- gRPC: `127.0.0.1:50051`
 
 ### 3) Sign in and create an access token
 
@@ -69,40 +82,48 @@ Console endpoints:
 - Copy and securely store the startup command from the creation dialog (`WORKER_SECRET` is one-time visible).
 ![Worker created dialog (startup command and one-time secret)](static/docs/quickstart-worker-created-modal.png)
 
-### 5) Run `worker-docker`
+### 5) Run worker
 
-- Download the latest worker binary from GitHub Releases:
-  - `https://github.com/onlyboxes/onlyboxes/releases/latest`
-- Use the startup command values from dashboard, and replace binary path with your downloaded executable.
+> [!WARNING]
+> Workers support different runtimes and environments. The current release only provides `worker-docker`. This section uses the Docker runtime as an example.
 
-```bash
-# Example
-WORKER_CONSOLE_INSECURE=true \
-WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 \
-WORKER_ID=<worker_id> \
-WORKER_SECRET=<worker_secret> \
-./onlyboxes-worker-docker
-```
+1. Log in to the machine where the worker will be deployed.
+    - Ensure Docker Engine is installed.
+    - Ensure the worker can reach the console gRPC endpoint.
+2. Download the latest `worker-docker` binary from GitHub Releases:
+    - `https://github.com/onlyboxes/onlyboxes/releases/latest`
+3. Use the startup command values from the dashboard, and replace the binary path with your downloaded executable.
+    - Workers reject insecure console endpoints by default; set `WORKER_CONSOLE_INSECURE=true` only to allow plaintext connections.
+
+    ```bash
+    # Example
+    WORKER_CONSOLE_INSECURE=true \
+    WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 \
+    WORKER_ID=<worker_id> \
+    WORKER_SECRET=<worker_secret> \
+    ./onlyboxes-worker-docker
+    ```
 
 ### 6) Verify readiness
 
 - Confirm the worker is `online` on the dashboard Workers page.
-- For REST/MCP request examples, use `API.md`.
+- For REST API request examples, see `API.md`.
 - If no tokens are configured, `/mcp` and execution APIs return `401` by design.
+- Add the MCP endpoint `http://127.0.0.1:8089/mcp` in any LLM Chat Client, set the token, and verify it works correctly.
 
 ## Production Checklist
 
-- Replace all default credentials and rotate them regularly.
-- Keep `:50051` private; expose only `:8089` through your trusted ingress/reverse proxy.
+- Replace all default credentials.
+- Use a reverse proxy to enforce TLS for `:8089` and `:50051`.
 - Persist and back up the SQLite data directory (`CONSOLE_DB_PATH`).
-- Run workers on isolated hosts and limit Docker daemon access to trusted operators only.
-- Centralize logs and monitor worker online/offline events.
+- Run workers on isolated hosts to avoid sharing the Docker daemon with the console.
+- Read the `Configuration Reference` below for all available options and adjust as needed.
 
 ## Configuration Reference
 
 ### Console (`console`)
 
-| Variable | Default | Notes |
+| Environment Variable | Default | Notes |
 | --- | --- | --- |
 | `CONSOLE_HTTP_ADDR` | `:8089` | Dashboard + REST API listen address |
 | `CONSOLE_GRPC_ADDR` | `:50051` | Worker registry gRPC listen address |
@@ -116,7 +137,7 @@ WORKER_SECRET=<worker_secret> \
 
 ### Worker (`worker-docker`)
 
-| Variable | Default | Notes |
+| Environment Variable | Default | Notes |
 | --- | --- | --- |
 | `WORKER_ID` | _(required)_ | Issued by `POST /api/v1/workers` |
 | `WORKER_SECRET` | _(required)_ | Issued once by `POST /api/v1/workers` |
@@ -170,10 +191,9 @@ Web dev URL defaults to `http://127.0.0.1:5178` and proxies `/api/*` to `http://
 
 ## Security and Operational Notes
 
-- Console gRPC has no built-in TLS/mTLS in this release; `worker-docker` requires explicit `WORKER_CONSOLE_INSECURE=true` to connect over plaintext.
+- Console does not provide built-in TLS/mTLS in this release; `worker-docker` requires explicit `WORKER_CONSOLE_INSECURE=true` to connect over plaintext.
 - Put console HTTP (`:8089`) and gRPC (`:50051`) behind a reverse proxy/gateway and enforce TLS on public/external links.
 - `WORKER_SECRET` and access token plaintext values are returned only at creation time.
-- `GET /api/v1/workers/:node_id/startup-command` and `GET /api/v1/console/tokens/:token_id/value` intentionally return `410 Gone`.
 - Dashboard login sessions are in-memory and are invalidated when `console` restarts.
 
 ## License

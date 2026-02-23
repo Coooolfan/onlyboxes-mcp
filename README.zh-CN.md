@@ -3,55 +3,68 @@
 [English](README.md)
 
 Onlyboxes 是一个面向个人与小型团队的自托管代码执行沙箱平台。
-系统采用控制面（`console`）与执行面（`worker-docker`）分离架构，并同时提供 REST API 与 MCP 接口。
+
+系统采用控制面（`console`）与执行面（`worker`）分离架构，并同时提供 REST API 与 MCP 接口。
 
 ## 核心能力
 
-- 自托管控制节点，内置 Web 控制台（由 `console` 提供）
-- Worker 凭据按需创建，`WORKER_SECRET` 仅一次性下发
-- 账号维度的 token 管理，用于执行 API 与 MCP 鉴权
-- 能力路由执行（`echo`、`pythonExec`、`terminalExec`、`readImage`）
-- 任务生命周期接口，支持同步/异步执行（`/api/v1/tasks`）
-- SQLite 持久化账号、token、worker、task 元数据
+- 自托管所有组件：控制节点（`console`）+ 执行节点（`worker`）
+- 控制面分离：
+  - 执行节点支持 **横向扩展**
+  - 执行节点支持 多语言**异构开发**
+  - 执行节点支持 **多种运行时**
+- 完整的账号体系：账号间资源（有状态容器、会话）横向隔离
+- MCP 接口：
+  - `pythonExec`：Python 代码执行
+  - `terminalExec`：有状态终端会话
+  - `readImage`：模型可读的图片
+- REST API 接口：所有 MCP 接口均支持 HTTP 调用 + 异步任务接口
 
 > [!WARNING]
-> 当前版本中，console gRPC 不提供内建 TLS/mTLS。
 >
-> `worker-docker` 默认会拒绝不安全的 console 端点；只有显式设置 `WORKER_CONSOLE_INSECURE=true` 才允许明文连接。
+> 当前版本中，console (gRPC + HTTP) 不提供内建 TLS/mTLS 支持。
+>
+> `worker` 默认会拒绝不安全的 console 端点；只有显式设置 `WORKER_CONSOLE_INSECURE=true` 才允许明文连接。
 >
 > 请将 console 的 HTTP（`:8089`）和 gRPC（`:50051`）端点放在反向代理/网关之后，并对外部流量强制开启 TLS。
 
 ## 架构
 
-![架构](static/architecture.zh-CN.svg)
+![架构](static/architecture.zh-CN.svg#gh-light-mode-only)
+![架构](static/architecture.zh-CN-dark.svg#gh-dark-mode-only)
 
 ## 快速开始（自托管）
 
 ### 1）前置条件
 
-- Docker Engine（`worker-docker` 依赖）
-- Go `1.24+`（若从源码运行 worker）
+- 控制节点：
+  - Docker Engine（如果使用 docker 部署，控制节点无依赖）
+- 执行节点
+  - Docker Engine（`worker-docker` 依赖）
 
 ### 2）启动 console
 
-1. 先修改 `docker/docker-compose.yml`，至少替换：
+1. 下载 `docker-compose.yml` 文件：
+
+    ```bash
+    mkdir -p onlyboxes-console && cd onlyboxes-console
+    wget https://raw.githubusercontent.com/Coooolfan/onlyboxes/refs/heads/main/docker/docker-compose.yml
+
+    ```
+
+2. 修改 `docker-compose.yml`，至少替换：
    - `CONSOLE_HASH_KEY`
    - `CONSOLE_DASHBOARD_PASSWORD`
-2. 启动服务：
+3. 启动服务：
 
-```bash
-docker compose -f docker/docker-compose.yml up -d
-```
-
-查看实时日志：
-
-```bash
-docker compose -f docker/docker-compose.yml logs -f console
-```
+    ```bash
+    docker compose up -d
+    ```
 
 默认访问地址：
 
-- 控制台/API：`http://127.0.0.1:8089`
+- 控制台 Web UI / HTTP REST API / MCP 端点：`http://127.0.0.1:8089`
+- gRPC：`127.0.0.1:50051`
 
 ### 3）登录并创建访问 token
 
@@ -69,40 +82,48 @@ docker compose -f docker/docker-compose.yml logs -f console
 - 在创建弹窗中复制并安全保存启动命令（`WORKER_SECRET` 仅一次可见）。
 ![Worker 创建完成弹窗（启动命令与一次性密钥）](static/docs/quickstart-worker-created-modal.png)
 
-### 5）启动 `worker-docker`
+### 5）启动 worker
 
-- 从 GitHub Releases 下载最新 worker 二进制：
-  - `https://github.com/onlyboxes/onlyboxes/releases/latest`
-- 将控制台中创建 worker 返回的参数替换到启动命令中，并将可执行文件路径替换为你下载的二进制。
+> [!WARNING]
+> worker 支持不同运行时与运行环境，当前版本仅提供 `worker-docker`。本小节以此 docker 运行时为例。
 
-```bash
-# 示例
-WORKER_CONSOLE_INSECURE=true \
-WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 \
-WORKER_ID=<worker_id> \
-WORKER_SECRET=<worker_secret> \
-./onlyboxes-worker-docker
-```
+1. 登陆到需要部署 worker 的机器。
+    - 确保 Docker Engine 已安装。
+    - 确保 worker 可以访问 console gRPC 端点。
+2. 从 GitHub Releases 下载最新 `worker-docker` 二进制：
+    - `https://github.com/onlyboxes/onlyboxes/releases/latest`
+3. 将控制台中创建 worker 返回的参数替换到启动命令中，并将可执行文件路径替换为你下载的二进制。
+    - worker 默认拒绝不安全的 console 端点；只有显式设置 `WORKER_CONSOLE_INSECURE=true` 才允许明文连接。
+
+    ```bash
+    # 示例
+    WORKER_CONSOLE_INSECURE=true \
+    WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 \
+    WORKER_ID=<worker_id> \
+    WORKER_SECRET=<worker_secret> \
+    ./onlyboxes-worker-docker
+    ```
 
 ### 6）验证运行状态
 
 - 在控制台 Workers 页面确认 worker 状态为 `online`。
-- REST/MCP 调用示例请参考 `API.zh-CN.md`。
+- REST API 调用示例请参考 `API.zh-CN.md`。
 - 若系统中没有任何 token，`/mcp` 与执行类 API 会按预期返回 `401`。
+- 在任意 LLM Chat Client 中添加 MCP 端点 `http://127.0.0.1:8089/mcp`，并设置 token，确认可以正常工作。
 
 ## 生产部署检查清单
 
-- 替换所有默认账号和默认密钥，并定期轮换。
-- 将 `:50051` 保持在内网，仅通过可信反向代理暴露 `:8089`。
+- 替换所有默认账号和默认密钥。
+- 使用反向代理为 `:8089`、`:50051` 提供强制 TLS 支持。
 - 持久化并备份 SQLite 数据目录（`CONSOLE_DB_PATH`）。
-- 将 worker 部署在隔离主机上，并严格限制 Docker 守护进程访问权限。
-- 接入集中日志与告警，重点关注 worker 在线/离线状态变化。
+- 将 worker 部署在独立主机上，避免与控制台共用 Docker 守护进程。
+- 阅读下文`配置参考`，了解所有配置项，根据需求调整配置。
 
 ## 配置参考
 
 ### Console（`console`）
 
-| 变量 | 默认值 | 说明 |
+| 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `CONSOLE_HTTP_ADDR` | `:8089` | 控制台与 REST API 监听地址 |
 | `CONSOLE_GRPC_ADDR` | `:50051` | Worker 注册 gRPC 监听地址 |
@@ -116,7 +137,7 @@ WORKER_SECRET=<worker_secret> \
 
 ### Worker（`worker-docker`）
 
-| 变量 | 默认值 | 说明 |
+| 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `WORKER_ID` | _(必填)_ | 由 `POST /api/v1/workers` 下发 |
 | `WORKER_SECRET` | _(必填)_ | 由 `POST /api/v1/workers` 一次性下发 |
@@ -170,10 +191,9 @@ yarn --cwd web dev
 
 ## 安全与运维注意事项
 
-- 当前版本 console gRPC 不提供内建 TLS/mTLS；`worker-docker` 只有在显式设置 `WORKER_CONSOLE_INSECURE=true` 时才会走明文连接。
+- 当前版本 console 不提供内建 TLS/mTLS；`worker-docker` 只有在显式设置 `WORKER_CONSOLE_INSECURE=true` 时才会走明文连接。
 - 请将 console HTTP（`:8089`）和 gRPC（`:50051`）放在反向代理/网关之后，对公网或外部链路强制 TLS。
 - `WORKER_SECRET` 与 token 明文都只在创建时返回一次。
-- `GET /api/v1/workers/:node_id/startup-command` 与 `GET /api/v1/console/tokens/:token_id/value` 固定返回 `410 Gone`。
 - 控制台登录会话为内存态，`console` 重启后会失效。
 
 ## 许可证
