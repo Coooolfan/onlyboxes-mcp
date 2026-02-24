@@ -9,7 +9,7 @@ const (
 	defaultMCPEchoTimeoutMS        = defaultEchoTimeoutMS
 	minMCPTaskTimeoutMS            = 1
 	defaultMCPTaskTimeoutMS        = defaultTaskTimeoutMS
-	maxMCPPythonExecTimeoutMS      = maxTaskTimeoutMS
+	maxMCPTaskTimeoutMS            = maxTaskTimeoutMS
 	minMCPTerminalLeaseSec         = 1
 	maxMCPTerminalLeaseSec         = 86400
 	mcpEchoToolTitle               = "Echo Message"
@@ -90,7 +90,7 @@ var mcpPythonExecToolDescription = "Executes Python code in the worker sandbox v
 
 var mcpTerminalExecToolDescription = "Executes shell commands in a persistent Docker-backed terminal session via the terminalExec capability. Sessions run on onlyboxes default-work-image (ubuntu:24.04), commands are executed with sh -lc, and common tools are preinstalled (python3/pip/venv, git, curl/wget, jq, ripgrep, fd-find, tree, file, zip/unzip, sqlite3). Reuse session_id to preserve filesystem state across calls. create_if_missing controls missing-session behavior. lease_ttl_sec extends session lease within configured bounds. timeout_ms is a synchronous execution timeout in milliseconds (1-600000, default 60000)."
 
-var mcpComputerUseToolDescription = "Executes shell commands on the caller-owned worker-sys host via the computerUse capability. This tool is account-scoped and requires a user-created worker-sys. command is required. timeout_ms is a synchronous execution timeout in milliseconds (1-600000, default 60000). request_id provides idempotency for retries."
+var mcpComputerUseToolDescription = "Executes shell commands directly on the caller-owned worker-sys host OS via /bin/sh -lc. Unlike terminalExec, this tool runs on the bare host without container isolation and is stateless — each invocation is independent with no session persistence. Only one command runs at a time (single concurrency). This tool is account-scoped and requires a user-created worker-sys. timeout_ms is a synchronous execution timeout in milliseconds (1-600000, default 60000). request_id provides idempotency for retries."
 
 var mcpReadImageToolDescription = "Reads a file from an existing terminal session and returns it as inline image content when mime type is image/*. For unsupported mime types, returns a text explanation."
 
@@ -138,7 +138,7 @@ var mcpPythonExecInputSchema = map[string]any{
 			"type":        "integer",
 			"description": "Optional synchronous execution timeout in milliseconds for this tool call.",
 			"minimum":     minMCPTaskTimeoutMS,
-			"maximum":     maxMCPPythonExecTimeoutMS,
+			"maximum":     maxMCPTaskTimeoutMS,
 			"default":     defaultMCPTaskTimeoutMS,
 		},
 	},
@@ -192,7 +192,7 @@ var mcpTerminalExecInputSchema = map[string]any{
 			"type":        "integer",
 			"description": "Optional synchronous execution timeout in milliseconds for this tool call.",
 			"minimum":     minMCPTaskTimeoutMS,
-			"maximum":     maxMCPPythonExecTimeoutMS,
+			"maximum":     maxMCPTaskTimeoutMS,
 			"default":     defaultMCPTaskTimeoutMS,
 		},
 	},
@@ -242,7 +242,7 @@ var mcpComputerUseInputSchema = map[string]any{
 			"type":        "integer",
 			"description": "Optional synchronous execution timeout in milliseconds for this tool call.",
 			"minimum":     minMCPTaskTimeoutMS,
-			"maximum":     maxMCPPythonExecTimeoutMS,
+			"maximum":     maxMCPTaskTimeoutMS,
 			"default":     defaultMCPTaskTimeoutMS,
 		},
 		"request_id": map[string]any{
@@ -294,7 +294,7 @@ var mcpReadImageInputSchema = map[string]any{
 			"type":        "integer",
 			"description": "Optional synchronous execution timeout in milliseconds for this tool call.",
 			"minimum":     minMCPTaskTimeoutMS,
-			"maximum":     maxMCPPythonExecTimeoutMS,
+			"maximum":     maxMCPTaskTimeoutMS,
 			"default":     defaultMCPTaskTimeoutMS,
 		},
 	},

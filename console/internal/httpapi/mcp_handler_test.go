@@ -212,8 +212,8 @@ func TestMCPToolsList(t *testing.T) {
 	if got := asInt(t, pythonTimeoutSchema["minimum"]); got != minMCPTaskTimeoutMS {
 		t.Fatalf("expected pythonExec.timeout_ms.minimum=%d, got %d", minMCPTaskTimeoutMS, got)
 	}
-	if got := asInt(t, pythonTimeoutSchema["maximum"]); got != maxMCPPythonExecTimeoutMS {
-		t.Fatalf("expected pythonExec.timeout_ms.maximum=%d, got %d", maxMCPPythonExecTimeoutMS, got)
+	if got := asInt(t, pythonTimeoutSchema["maximum"]); got != maxMCPTaskTimeoutMS {
+		t.Fatalf("expected pythonExec.timeout_ms.maximum=%d, got %d", maxMCPTaskTimeoutMS, got)
 	}
 	if got := asInt(t, pythonTimeoutSchema["default"]); got != defaultMCPTaskTimeoutMS {
 		t.Fatalf("expected pythonExec.timeout_ms.default=%d, got %d", defaultMCPTaskTimeoutMS, got)

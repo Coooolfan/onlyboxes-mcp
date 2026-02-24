@@ -1,4 +1,4 @@
-# Worker Sys Overview
+# Worker Sys Overview: !!!POC Only!!!
 
 `worker-sys` connects to console over gRPC bidi stream `Connect`, sends hello (`worker_secret`), sends periodic heartbeats, and handles `computerUse` command dispatch/result in the same stream.
 

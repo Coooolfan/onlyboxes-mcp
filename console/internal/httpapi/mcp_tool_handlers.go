@@ -44,7 +44,7 @@ func handleMCPPythonExecTool(ctx context.Context, dispatcher CommandDispatcher, 
 	if input.TimeoutMS != nil {
 		timeoutMS = *input.TimeoutMS
 	}
-	if timeoutMS < minMCPTaskTimeoutMS || timeoutMS > maxMCPPythonExecTimeoutMS {
+	if timeoutMS < minMCPTaskTimeoutMS || timeoutMS > maxMCPTaskTimeoutMS {
 		return nil, mcpPythonExecToolOutput{}, invalidParamsError("timeout_ms must be between 1 and 600000")
 	}
 	if dispatcher == nil {
@@ -105,7 +105,7 @@ func handleMCPTerminalExecTool(ctx context.Context, dispatcher CommandDispatcher
 	if input.TimeoutMS != nil {
 		timeoutMS = *input.TimeoutMS
 	}
-	if timeoutMS < minMCPTaskTimeoutMS || timeoutMS > maxMCPPythonExecTimeoutMS {
+	if timeoutMS < minMCPTaskTimeoutMS || timeoutMS > maxMCPTaskTimeoutMS {
 		return nil, mcpTerminalExecToolOutput{}, invalidParamsError("timeout_ms must be between 1 and 600000")
 	}
 	if dispatcher == nil {
@@ -168,7 +168,7 @@ func handleMCPComputerUseTool(ctx context.Context, dispatcher CommandDispatcher,
 	if input.TimeoutMS != nil {
 		timeoutMS = *input.TimeoutMS
 	}
-	if timeoutMS < minMCPTaskTimeoutMS || timeoutMS > maxMCPPythonExecTimeoutMS {
+	if timeoutMS < minMCPTaskTimeoutMS || timeoutMS > maxMCPTaskTimeoutMS {
 		return nil, mcpComputerUseToolOutput{}, invalidParamsError("timeout_ms must be between 1 and 600000")
 	}
 	if dispatcher == nil {
@@ -232,7 +232,7 @@ func handleMCPReadImageTool(ctx context.Context, dispatcher CommandDispatcher, i
 	if input.TimeoutMS != nil {
 		timeoutMS = *input.TimeoutMS
 	}
-	if timeoutMS < minMCPTaskTimeoutMS || timeoutMS > maxMCPPythonExecTimeoutMS {
+	if timeoutMS < minMCPTaskTimeoutMS || timeoutMS > maxMCPTaskTimeoutMS {
 		return nil, nil, invalidParamsError("timeout_ms must be between 1 and 600000")
 	}
 	if dispatcher == nil {
