@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from 'vue'
+import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 
+import DashboardLayout from '@/layouts/DashboardLayout.vue'
+import DefaultLayout from '@/layouts/DefaultLayout.vue'
+
 const route = useRoute()
-const DefaultLayout = defineAsyncComponent(() => import('@/layouts/DefaultLayout.vue'))
-const DashboardLayout = defineAsyncComponent(() => import('@/layouts/DashboardLayout.vue'))
 
 const layout = computed(() => {
   return route.meta.layout === 'dashboard' ? DashboardLayout : DefaultLayout

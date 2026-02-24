@@ -55,6 +55,11 @@ func (s *RegistryService) Connect(stream grpc.BidiStreamingServer[registryv1.Con
 	} else if subtle.ConstantTimeCompare([]byte(secret), []byte(workerSecret)) != 1 {
 		return status.Error(codes.Unauthenticated, "invalid worker credential")
 	}
+	resolvedHello, err := s.resolveHelloByWorkerType(hello)
+	if err != nil {
+		return err
+	}
+	hello = resolvedHello
 
 	now := s.nowFn()
 	sessionID, err := s.newSessionIDFn()
@@ -119,6 +124,59 @@ func (s *RegistryService) Connect(stream grpc.BidiStreamingServer[registryv1.Con
 			return status.Error(codes.InvalidArgument, "unsupported frame type")
 		}
 	}
+}
+
+func (s *RegistryService) resolveHelloByWorkerType(hello *registryv1.ConnectHello) (*registryv1.ConnectHello, error) {
+	if hello == nil {
+		return nil, status.Error(codes.InvalidArgument, "hello frame is required")
+	}
+	if s == nil || s.store == nil {
+		return hello, nil
+	}
+
+	workerType := s.store.WorkerTypeByNodeID(hello.GetNodeId())
+	if workerType != registry.WorkerTypeSys {
+		return hello, nil
+	}
+
+	for _, capability := range hello.GetCapabilities() {
+		if capability == nil {
+			continue
+		}
+		if normalizeCapability(capability.GetName()) != computerUseCapabilityName {
+			return nil, status.Error(codes.PermissionDenied, "worker-sys supports only computerUse capability")
+		}
+	}
+	if len(hello.GetCapabilities()) == 0 {
+		return nil, status.Error(codes.PermissionDenied, "worker-sys supports only computerUse capability")
+	}
+
+	labels := cloneLabels(hello.GetLabels())
+	return &registryv1.ConnectHello{
+		NodeId:       hello.GetNodeId(),
+		NodeName:     hello.GetNodeName(),
+		ExecutorKind: hello.GetExecutorKind(),
+		Labels:       labels,
+		Version:      hello.GetVersion(),
+		WorkerSecret: hello.GetWorkerSecret(),
+		Capabilities: []*registryv1.CapabilityDeclaration{
+			{
+				Name:        computerUseCapabilityDeclared,
+				MaxInflight: 1,
+			},
+		},
+	}, nil
+}
+
+func cloneLabels(labels map[string]string) map[string]string {
+	if len(labels) == 0 {
+		return map[string]string{}
+	}
+	cloned := make(map[string]string, len(labels))
+	for key, value := range labels {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (s *RegistryService) handleHeartbeat(ctx context.Context, session *activeSession, heartbeat *registryv1.HeartbeatFrame) error {

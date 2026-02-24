@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/onlyboxes/onlyboxes/console/internal/grpcserver"
 	"github.com/onlyboxes/onlyboxes/console/internal/registry"
 )
 
@@ -31,7 +33,7 @@ type WorkerHandler struct {
 }
 
 type WorkerProvisioning interface {
-	CreateProvisionedWorker(now time.Time, offlineTTL time.Duration) (string, string, error)
+	CreateProvisionedWorkerForOwner(ownerID string, workerType string, now time.Time, offlineTTL time.Duration) (string, string, error)
 	DeleteProvisionedWorker(nodeID string) bool
 }
 
@@ -56,7 +58,12 @@ type listWorkersResponse struct {
 
 type workerStartupCommandResponse struct {
 	NodeID  string `json:"node_id"`
+	Type    string `json:"type"`
 	Command string `json:"command"`
+}
+
+type createWorkerRequest struct {
+	Type string `json:"type"`
 }
 
 func NewWorkerHandler(
@@ -92,6 +99,7 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 	execAPI.Use(mcpAuth.RequireToken())
 	execAPI.POST("/commands/echo", workerHandler.EchoCommand)
 	execAPI.POST("/commands/terminal", workerHandler.TerminalCommand)
+	execAPI.POST("/commands/computer-use", workerHandler.ComputerUseCommand)
 	execAPI.POST("/tasks", workerHandler.SubmitTask)
 	execAPI.GET("/tasks/:task_id", workerHandler.GetTask)
 	execAPI.POST("/tasks/:task_id/cancel", workerHandler.CancelTask)
@@ -118,17 +126,17 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 	dashboard.DELETE("/console/tokens/:token_id", mcpAuth.DeleteToken)
 	dashboard.GET("/console/tokens/:token_id/value", mcpAuth.GetTokenValue)
 	dashboard.POST("/console/register", consoleAuth.RequireAdmin(), consoleAuth.Register)
+	dashboard.GET("/workers", workerHandler.ListWorkers)
+	dashboard.GET("/workers/stats", workerHandler.WorkerStats)
+	dashboard.GET("/workers/inflight", workerHandler.WorkerInflight)
+	dashboard.POST("/workers", workerHandler.CreateWorker)
+	dashboard.DELETE("/workers/:node_id", workerHandler.DeleteWorker)
+	dashboard.GET("/workers/:node_id/startup-command", workerHandler.GetWorkerStartupCommand)
 
 	adminDashboard := api.Group("/")
 	adminDashboard.Use(consoleAuth.RequireAuth(), consoleAuth.RequireAdmin())
 	adminDashboard.GET("/console/accounts", consoleAuth.ListAccounts)
 	adminDashboard.DELETE("/console/accounts/:account_id", consoleAuth.DeleteAccount)
-	adminDashboard.GET("/workers", workerHandler.ListWorkers)
-	adminDashboard.GET("/workers/stats", workerHandler.WorkerStats)
-	adminDashboard.GET("/workers/inflight", workerHandler.WorkerInflight)
-	adminDashboard.POST("/workers", workerHandler.CreateWorker)
-	adminDashboard.DELETE("/workers/:node_id", workerHandler.DeleteWorker)
-	adminDashboard.GET("/workers/:node_id/startup-command", workerHandler.GetWorkerStartupCommand)
 
 	registerEmbeddedWebRoutes(router)
 
@@ -136,6 +144,12 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 }
 
 func (h *WorkerHandler) ListWorkers(c *gin.Context) {
+	ownerID, isAdmin, ok := resolveWorkerAccessScope(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	page, ok := parsePositiveIntQuery(c, "page", 1)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "page must be a positive integer"})
@@ -156,7 +170,21 @@ func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 		return
 	}
 
-	workers, total := h.store.List(status, page, pageSize, h.nowFn(), h.offlineTTL)
+	var workers []registry.WorkerView
+	total := 0
+	if isAdmin {
+		workers, total = h.store.List(status, page, pageSize, h.nowFn(), h.offlineTTL)
+	} else {
+		workers, total = h.store.ListScoped(
+			status,
+			page,
+			pageSize,
+			h.nowFn(),
+			h.offlineTTL,
+			ownerID,
+			registry.WorkerTypeSys,
+		)
+	}
 	items := make([]workerItem, 0, len(workers))
 	for _, worker := range workers {
 		items = append(items, workerItem{
@@ -181,24 +209,59 @@ func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 }
 
 func (h *WorkerHandler) CreateWorker(c *gin.Context) {
+	ownerID, isAdmin, ok := resolveWorkerAccessScope(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
 	if h.provisioning == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "worker provisioning is unavailable"})
 		return
 	}
 
-	nodeID, workerSecret, err := h.provisioning.CreateProvisionedWorker(h.nowFn(), h.offlineTTL)
+	var req createWorkerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	workerType := strings.TrimSpace(strings.ToLower(req.Type))
+	if workerType != registry.WorkerTypeNormal && workerType != registry.WorkerTypeSys {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "type must be one of normal|worker-sys"})
+		return
+	}
+	if !isAdmin && workerType == registry.WorkerTypeNormal {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only admin can create normal worker"})
+		return
+	}
+
+	nodeID, workerSecret, err := h.provisioning.CreateProvisionedWorkerForOwner(ownerID, workerType, h.nowFn(), h.offlineTTL)
 	if err != nil {
+		if errors.Is(err, grpcserver.ErrWorkerSysAlreadyExists) {
+			c.JSON(http.StatusConflict, gin.H{"error": "worker-sys already exists for current account"})
+			return
+		}
+		if errors.Is(err, grpcserver.ErrInvalidWorkerType) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "type must be one of normal|worker-sys"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create worker"})
 		return
 	}
 
 	c.JSON(http.StatusCreated, workerStartupCommandResponse{
 		NodeID:  nodeID,
+		Type:    workerType,
 		Command: h.buildWorkerStartupCommand(nodeID, workerSecret, c.Request),
 	})
 }
 
 func (h *WorkerHandler) DeleteWorker(c *gin.Context) {
+	ownerID, isAdmin, ok := resolveWorkerAccessScope(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	nodeID := strings.TrimSpace(c.Param("node_id"))
 	if nodeID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "node_id is required"})
@@ -207,6 +270,18 @@ func (h *WorkerHandler) DeleteWorker(c *gin.Context) {
 	if h.provisioning == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "worker provisioning is unavailable"})
 		return
+	}
+	if !isAdmin {
+		worker, found := h.store.GetByNodeID(nodeID, h.nowFn(), h.offlineTTL)
+		if !found {
+			c.JSON(http.StatusNotFound, gin.H{"error": "worker not found"})
+			return
+		}
+		if strings.TrimSpace(worker.Labels[registry.LabelOwnerIDKey]) != ownerID ||
+			strings.TrimSpace(strings.ToLower(worker.Labels[registry.LabelWorkerTypeKey])) != registry.WorkerTypeSys {
+			c.JSON(http.StatusNotFound, gin.H{"error": "worker not found"})
+			return
+		}
 	}
 	if !h.provisioning.DeleteProvisionedWorker(nodeID) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "worker not found"})
@@ -264,6 +339,19 @@ func resolveWorkerGRPCTarget(consoleGRPCAddr string, req *http.Request) string {
 	}
 
 	return net.JoinHostPort(host, port)
+}
+
+func resolveWorkerAccessScope(c *gin.Context) (string, bool, bool) {
+	account, ok := requestSessionAccountFromGin(c)
+	if ok {
+		ownerID := strings.TrimSpace(account.AccountID)
+		if ownerID == "" {
+			return "", false, false
+		}
+		return ownerID, account.IsAdmin, true
+	}
+	// Fallback for deployments/tests without dashboard auth.
+	return "system", true, true
 }
 
 func parseAddrHostPort(addr string) (string, string) {

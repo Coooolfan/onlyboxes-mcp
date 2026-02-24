@@ -80,17 +80,20 @@ describe('Auth Routing', () => {
     wrapper.unmount()
   })
 
-  it('redirects non-admin /workers access to /tokens', async () => {
+  it('allows non-admin /workers access', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === '/api/v1/console/session') {
         return jsonResponse(memberSessionPayload)
       }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse(defaultTokensPayload())
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return jsonResponse(statsPayload)
       }
-      if (url.startsWith('/api/v1/workers')) {
-        throw new Error(`workers api should not be called for non-admin: ${url}`)
+      if (url.startsWith('/api/v1/workers?')) {
+        return jsonResponse(workersPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
       }
       throw new Error(`unexpected url: ${url}`)
     })
@@ -98,9 +101,8 @@ describe('Auth Routing', () => {
 
     const wrapper = await mountApp('/workers')
 
-    expect(router.currentRoute.value.path).toBe('/tokens')
-    expect(wrapper.text()).toContain('Trusted Token Management')
-    expect(wrapper.text()).not.toContain('Execution Node Control Panel')
+    expect(router.currentRoute.value.path).toBe('/workers')
+    expect(wrapper.text()).toContain('Execution Node Control Panel')
 
     wrapper.unmount()
   })

@@ -52,7 +52,7 @@ func (s *Store) Upsert(req *registryv1.ConnectHello, sessionID string, now time.
 		for _, row := range existingLabels {
 			base[row.LabelKey] = row.LabelValue
 		}
-		labels = mergeLabels(base, labels)
+		labels = mergeLabelsPreserveKeys(base, labels, LabelOwnerIDKey, LabelWorkerTypeKey)
 	}
 
 	capabilities := resolveProtoCapabilities(req.GetCapabilities())

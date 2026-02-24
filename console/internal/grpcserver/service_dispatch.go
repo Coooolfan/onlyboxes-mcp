@@ -10,6 +10,7 @@ import (
 	"time"
 
 	registryv1 "github.com/onlyboxes/onlyboxes/api/gen/go/registry/v1"
+	"github.com/onlyboxes/onlyboxes/console/internal/registry"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -47,7 +48,7 @@ func (s *RegistryService) DispatchEcho(ctx context.Context, message string, time
 		timeout = defaultEchoTimeout
 	}
 
-	outcome, err := s.dispatchCommand(ctx, echoCapabilityName, buildEchoPayload(message), timeout, nil)
+	outcome, err := s.dispatchCommand(ctx, echoCapabilityName, buildEchoPayload(message), timeout, "", nil)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNoCapabilityWorker):
@@ -81,6 +82,7 @@ func (s *RegistryService) dispatchCommand(
 	capability string,
 	payloadJSON []byte,
 	timeout time.Duration,
+	ownerID string,
 	onDispatched func(commandID string),
 ) (commandOutcome, error) {
 	capability = normalizeCapability(capability)
@@ -101,7 +103,7 @@ func (s *RegistryService) dispatchCommand(
 	defer cancel()
 
 	terminalSessionID := terminalSessionIDFromPayload(capability, payloadJSON)
-	session, terminalRouteCreated, err := s.pickSessionForDispatch(capability, terminalSessionID)
+	session, terminalRouteCreated, err := s.pickSessionForDispatch(capability, ownerID, terminalSessionID)
 	if err != nil {
 		return commandOutcome{}, err
 	}
@@ -185,10 +187,10 @@ func (s *RegistryService) dispatchCommand(
 	}
 }
 
-func (s *RegistryService) pickSessionForDispatch(capability string, terminalSessionID string) (*activeSession, bool, error) {
+func (s *RegistryService) pickSessionForDispatch(capability string, ownerID string, terminalSessionID string) (*activeSession, bool, error) {
 	normalizedTerminalSessionID := strings.TrimSpace(terminalSessionID)
 	if normalizedTerminalSessionID == "" {
-		session, err := s.pickSessionForCapability(capability)
+		session, err := s.pickSessionForCapability(capability, ownerID)
 		return session, false, err
 	}
 	now := s.nowFn()
@@ -196,7 +198,7 @@ func (s *RegistryService) pickSessionForDispatch(capability string, terminalSess
 
 	nodeID, ok := s.touchTerminalSessionRoute(normalizedTerminalSessionID, now)
 	if !ok {
-		return s.tryReserveAndPickTerminalSession(capability, normalizedTerminalSessionID, now)
+		return s.tryReserveAndPickTerminalSession(capability, ownerID, normalizedTerminalSessionID, now)
 	}
 
 	session, err := s.pickSessionForNodeAndCapability(nodeID, capability)
@@ -205,17 +207,18 @@ func (s *RegistryService) pickSessionForDispatch(capability string, terminalSess
 	}
 	if errors.Is(err, ErrNoCapabilityWorker) {
 		s.clearTerminalSessionRoute(normalizedTerminalSessionID, nodeID)
-		return s.tryReserveAndPickTerminalSession(capability, normalizedTerminalSessionID, now)
+		return s.tryReserveAndPickTerminalSession(capability, ownerID, normalizedTerminalSessionID, now)
 	}
 	return nil, false, err
 }
 
 func (s *RegistryService) tryReserveAndPickTerminalSession(
 	capability string,
+	ownerID string,
 	normalizedTerminalSessionID string,
 	now time.Time,
 ) (*activeSession, bool, error) {
-	session, err := s.pickSessionForCapability(capability)
+	session, err := s.pickSessionForCapability(capability, ownerID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -239,7 +242,7 @@ func (s *RegistryService) tryReserveAndPickTerminalSession(
 	// The reserved route became stale before we could acquire it; clear and retry once.
 	s.clearTerminalSessionRoute(normalizedTerminalSessionID, resolvedNodeID)
 
-	session, err = s.pickSessionForCapability(capability)
+	session, err = s.pickSessionForCapability(capability, ownerID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -274,9 +277,8 @@ func (s *RegistryService) pickSessionForNodeAndCapability(nodeID string, capabil
 	return session, nil
 }
 
-func (s *RegistryService) pickSessionForCapability(capability string) (*activeSession, error) {
-	now := s.nowFn()
-	nodeIDs := s.store.ListOnlineNodeIDsByCapability(capability, now, time.Duration(s.offlineTTLSec)*time.Second)
+func (s *RegistryService) pickSessionForCapability(capability string, ownerID string) (*activeSession, error) {
+	nodeIDs := s.listOnlineNodeIDsForCapability(capability, ownerID)
 	if len(nodeIDs) == 0 {
 		return nil, ErrNoCapabilityWorker
 	}
@@ -333,6 +335,25 @@ func (s *RegistryService) pickSessionForCapability(capability string) (*activeSe
 		}
 	}
 	return nil, ErrNoWorkerCapacity
+}
+
+func (s *RegistryService) listOnlineNodeIDsForCapability(capability string, ownerID string) []string {
+	now := s.nowFn()
+	offlineTTL := time.Duration(s.offlineTTLSec) * time.Second
+	if normalizeCapability(capability) == computerUseCapabilityName {
+		normalizedOwnerID := normalizeTaskOwnerID(ownerID)
+		if normalizedOwnerID == "" {
+			return []string{}
+		}
+		return s.store.ListOnlineNodeIDsByOwnerTypeAndCapability(
+			normalizedOwnerID,
+			registry.WorkerTypeSys,
+			capability,
+			now,
+			offlineTTL,
+		)
+	}
+	return s.store.ListOnlineNodeIDsByCapability(capability, now, offlineTTL)
 }
 
 func normalizeCapability(capability string) string {

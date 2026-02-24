@@ -34,7 +34,7 @@ type NavItem = {
 }
 
 const navItems: NavItem[] = [
-  { label: 'Workers', to: '/workers', icon: 'box', requiresAdmin: true },
+  { label: 'Workers', to: '/workers', icon: 'box' },
   { label: 'Accounts', to: '/accounts', icon: 'users', requiresAdmin: true },
   { label: 'Tokens', to: '/tokens', icon: 'key' },
 ]
@@ -195,7 +195,7 @@ watch(sidebarCollapsed, (collapsed) => {
           rel="noopener noreferrer"
           :title="`Console ${authStore.consoleVersion} · GitHub`"
           aria-label="Onlyboxes Console GitHub"
-          class="inline-flex items-center justify-center rounded-md p-1.5 text-secondary hover:text-primary hover:bg-surface-soft transition-colors shrink-0"
+          class="console-footer-link inline-flex items-center justify-center rounded-md p-1.5 text-secondary hover:text-primary hover:bg-surface-soft transition-colors shrink-0"
         >
           <AppIcon name="github" :size="16" />
         </a>

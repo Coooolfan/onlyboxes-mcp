@@ -8,6 +8,7 @@ import type {
   WorkerStartupCommandResponse,
   WorkerStatsResponse,
   WorkerStatus,
+  WorkerType,
 } from '@/types/workers'
 
 export async function fetchWorkersAPI(
@@ -73,14 +74,16 @@ export async function fetchWorkerInflightAPI(
   }
 }
 
-export async function createWorkerAPI(): Promise<WorkerStartupCommandResponse> {
+export async function createWorkerAPI(workerType: WorkerType): Promise<WorkerStartupCommandResponse> {
   const response = await request('/api/v1/workers', {
     method: 'POST',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
-    body: '{}',
+    body: JSON.stringify({
+      type: workerType,
+    }),
   })
 
   if (!response.ok) {
@@ -89,13 +92,15 @@ export async function createWorkerAPI(): Promise<WorkerStartupCommandResponse> {
 
   const payload = (await response.json()) as WorkerStartupCommandResponse
   const nodeID = payload.node_id?.trim()
+  const type = payload.type
   const command = payload.command?.trim()
-  if (!nodeID || !command) {
+  if (!nodeID || (type !== 'normal' && type !== 'worker-sys') || !command) {
     throw new Error('API returned invalid worker startup payload.')
   }
 
   return {
     node_id: nodeID,
+    type,
     command,
   }
 }

@@ -65,6 +65,21 @@ func NewMCPHandler(dispatcher CommandDispatcher) http.Handler {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
+		Title:       mcpComputerUseToolTitle,
+		Name:        "computerUse",
+		Description: mcpComputerUseToolDescription,
+		Annotations: &mcp.ToolAnnotations{
+			Title:           mcpComputerUseToolTitle,
+			DestructiveHint: boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		},
+		InputSchema:  mcpComputerUseInputSchema,
+		OutputSchema: mcpComputerUseOutputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input mcpComputerUseToolInput) (*mcp.CallToolResult, mcpComputerUseToolOutput, error) {
+		return handleMCPComputerUseTool(ctx, dispatcher, input)
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
 		Title:       mcpReadImageToolTitle,
 		Name:        "readImage",
 		Description: mcpReadImageToolDescription,

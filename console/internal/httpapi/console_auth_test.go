@@ -334,8 +334,8 @@ func TestConsoleAuthRegisterAndAdminGuard(t *testing.T) {
 	workersReq.AddCookie(nonAdminCookie)
 	workersRec := httptest.NewRecorder()
 	router.ServeHTTP(workersRec, workersReq)
-	if workersRec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for non-admin workers access, got %d body=%s", workersRec.Code, workersRec.Body.String())
+	if workersRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for non-admin workers access, got %d body=%s", workersRec.Code, workersRec.Body.String())
 	}
 
 	nonAdminRegisterReq := httptest.NewRequest(http.MethodPost, "/api/v1/console/register", bytes.NewReader(registerBody))

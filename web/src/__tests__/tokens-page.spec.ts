@@ -80,62 +80,59 @@ describe('Tokens Page', () => {
       await newTokenBtn?.trigger('click')
       await flushPromises()
 
-      const nameInput = wrapper.find('.token-modal input')
-      expect(nameInput.exists()).toBe(true)
-      await nameInput.setValue('ci-staging')
-
-      const modalForm = wrapper.find('form.token-modal-form')
-      expect(modalForm.exists()).toBe(true)
-      await modalForm.trigger('submit.prevent')
+      const nameInput = document.body.querySelector<HTMLInputElement>('.token-modal input')
+      expect(nameInput).toBeTruthy()
+      nameInput!.value = 'ci-staging'
+      nameInput!.dispatchEvent(new window.Event('input', { bubbles: true }))
+      nameInput!.dispatchEvent(new window.Event('change', { bubbles: true }))
       await flushPromises()
 
-      expect(wrapper.text()).toContain('obx_plaintext_once')
-      expect(wrapper.findAll('.token-usage-label').map((node) => node.text())).toEqual([
-        'claude code',
-        'http header',
-        'mcp json',
-      ])
-      const httpHeaderUsageItem = wrapper
-        .findAll('.token-usage-item')
-        .find((node) => node.text().includes('http header'))
-      expect(httpHeaderUsageItem).toBeTruthy()
-      const httpHeaderUsageToggle = httpHeaderUsageItem?.find('.token-usage-trigger')
-      expect(httpHeaderUsageToggle?.exists()).toBe(true)
-      await httpHeaderUsageToggle?.trigger('click')
+      const createTokenBtn = Array.from(document.body.querySelectorAll('button')).find(
+        (button) => (button.textContent ?? '').trim() === 'Create Token',
+      )
+      expect(createTokenBtn).toBeTruthy()
+      expect((createTokenBtn as HTMLButtonElement | undefined)?.disabled).toBe(false)
+      createTokenBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await flushPromises()
-      const httpHeaderValue = httpHeaderUsageItem?.find('.token-usage-value').text() ?? ''
+      await flushPromises()
+
+      expect(document.body.textContent ?? '').toContain('obx_plaintext_once')
+      expect(document.body.textContent ?? '').toContain('claude code')
+      expect(document.body.textContent ?? '').toContain('http header')
+      expect(document.body.textContent ?? '').toContain('mcp json')
+
+      const httpHeaderTab = Array.from(document.body.querySelectorAll('button')).find(
+        (button) => (button.textContent ?? '').includes('http header'),
+      )
+      expect(httpHeaderTab).toBeTruthy()
+      httpHeaderTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flushPromises()
+      const httpHeaderValue = document.body.querySelector('.token-usage-value')?.textContent ?? ''
       expect(httpHeaderValue).toContain('Authorization: Bearer obx_plaintext_once')
       expect(httpHeaderValue).not.toContain('X-Onlyboxes-Token')
 
-      const mcpJSONUsageItem = wrapper
-        .findAll('.token-usage-item')
-        .find((node) => node.text().includes('mcp json'))
-      expect(mcpJSONUsageItem).toBeTruthy()
-      const mcpJSONUsageToggle = mcpJSONUsageItem?.find('.token-usage-trigger')
-      expect(mcpJSONUsageToggle?.exists()).toBe(true)
-      await mcpJSONUsageToggle?.trigger('click')
+      const mcpJSONTab = Array.from(document.body.querySelectorAll('button')).find((button) =>
+        (button.textContent ?? '').includes('mcp json'),
+      )
+      expect(mcpJSONTab).toBeTruthy()
+      mcpJSONTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await flushPromises()
-      const mcpJSONValue = mcpJSONUsageItem?.find('.token-usage-value').text() ?? ''
+      const mcpJSONValue = document.body.querySelector('.token-usage-value')?.textContent ?? ''
       expect(mcpJSONValue).toContain('"Authorization": "Bearer obx_plaintext_once"')
       expect(mcpJSONValue).not.toContain('X-Onlyboxes-Token')
 
-      const claudeUsageItem = wrapper
-        .findAll('.token-usage-item')
-        .find((node) => node.text().includes('claude code'))
-      expect(claudeUsageItem).toBeTruthy()
-
-      const claudeUsageToggle = claudeUsageItem?.find('.token-usage-trigger')
-      expect(claudeUsageToggle?.exists()).toBe(true)
-      expect(claudeUsageToggle?.text()).toContain('Expand')
-      await claudeUsageToggle?.trigger('click')
+      const claudeCodeTab = Array.from(document.body.querySelectorAll('button')).find((button) =>
+        (button.textContent ?? '').includes('claude code'),
+      )
+      expect(claudeCodeTab).toBeTruthy()
+      claudeCodeTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await flushPromises()
 
-      expect(claudeUsageToggle?.text()).toContain('Collapse')
-      const claudeCopyButton = claudeUsageItem
-        ?.findAll('button')
-        .find((button) => button.text() === 'Copy')
+      const claudeCopyButton = Array.from(document.body.querySelectorAll('button')).find(
+        (button) => (button.textContent ?? '').trim() === 'Copy',
+      )
       expect(claudeCopyButton).toBeTruthy()
-      await claudeCopyButton?.trigger('click')
+      claudeCopyButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await flushPromises()
       expect(writeText).toHaveBeenCalledTimes(1)
       const copiedClaudeCommand = String(writeText.mock.calls[0]?.[0] ?? '')
@@ -143,14 +140,11 @@ describe('Tokens Page', () => {
       expect(copiedClaudeCommand).toContain('Authorization: Bearer obx_plaintext_once')
       expect(copiedClaudeCommand).not.toContain('X-Onlyboxes-Token')
 
-      const doneBtn = wrapper.findAll('button').find((button) => button.text() === 'Done')
+      const doneBtn = Array.from(document.body.querySelectorAll('button')).find(
+        (button) => (button.textContent ?? '').trim() === 'Done',
+      )
       expect(doneBtn).toBeTruthy()
-      await doneBtn?.trigger('click')
-      await flushPromises()
-
-      const expandBtn = wrapper.findAll('button').find((button) => button.text() === 'Expand')
-      expect(expandBtn).toBeTruthy()
-      await expandBtn?.trigger('click')
+      doneBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await flushPromises()
 
       expect(wrapper.text()).toContain('ci-staging')
@@ -220,6 +214,8 @@ describe('Tokens Page', () => {
     const wrapper = await mountApp('/tokens')
     try {
       await waitForRoute('/tokens', 30)
+      await wrapper.get('header.h-16 .relative > button').trigger('click')
+      await flushPromises()
       const logoutBtn = wrapper.findAll('button').find((button) => button.text() === 'Logout')
       expect(logoutBtn).toBeTruthy()
       await logoutBtn?.trigger('click')
@@ -256,6 +252,8 @@ describe('Tokens Page', () => {
     const wrapper = await mountApp('/tokens')
     try {
       await waitForRoute('/tokens', 30)
+      await wrapper.get('header.h-16 .relative > button').trigger('click')
+      await flushPromises()
       const changePasswordBtn = wrapper
         .findAll('button')
         .find((button) => button.text() === 'Change Password')
@@ -263,14 +261,22 @@ describe('Tokens Page', () => {
       await changePasswordBtn?.trigger('click')
       await flushPromises()
 
-      const modal = wrapper.find('.password-modal')
-      expect(modal.exists()).toBe(true)
-      await modal.get('#current-password').setValue('member-pass')
-      await modal.get('#new-password').setValue('member-pass-next')
-      await modal.get('form.password-form').trigger('submit.prevent')
+      const modal = document.body.querySelector('.password-modal')
+      expect(modal).toBeTruthy()
+      const currentInput = document.body.querySelector<HTMLInputElement>('#current-password')
+      const newInput = document.body.querySelector<HTMLInputElement>('#new-password')
+      const form = document.body.querySelector<HTMLFormElement>('form.password-form')
+      expect(currentInput).toBeTruthy()
+      expect(newInput).toBeTruthy()
+      expect(form).toBeTruthy()
+      currentInput!.value = 'member-pass'
+      currentInput!.dispatchEvent(new Event('input', { bubbles: true }))
+      newInput!.value = 'member-pass-next'
+      newInput!.dispatchEvent(new Event('input', { bubbles: true }))
+      form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
       await flushPromises()
 
-      expect(wrapper.text()).toContain('Password updated successfully.')
+      expect(document.body.textContent ?? '').toContain('Password updated successfully.')
       const passwordCall = fetchMock.mock.calls.find(
         ([url, init]) =>
           String(url) === '/api/v1/console/password' &&

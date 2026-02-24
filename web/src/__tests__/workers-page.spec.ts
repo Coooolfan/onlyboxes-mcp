@@ -52,6 +52,8 @@ describe('Workers Page', () => {
     const wrapper = await mountApp('/workers')
     expect(wrapper.text()).toContain('version: v0.1.0')
 
+    await wrapper.get('header.h-16 .relative > button').trigger('click')
+    await flushPromises()
     const logoutBtn = wrapper.findAll('button').find((button) => button.text() === 'Logout')
     expect(logoutBtn).toBeTruthy()
     await logoutBtn?.trigger('click')
@@ -88,8 +90,16 @@ describe('Workers Page', () => {
     vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
 
     const wrapper = await mountApp('/workers')
+    await flushPromises()
+    await flushPromises()
 
     forceUnauthorized = true
+    const refreshMenuBtn = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('Refresh Controls'))
+    expect(refreshMenuBtn).toBeTruthy()
+    await refreshMenuBtn?.trigger('click')
+    await flushPromises()
     const refreshBtn = wrapper.findAll('button').find((button) => button.text() === 'Refresh Now')
     expect(refreshBtn).toBeTruthy()
     await refreshBtn?.trigger('click')
@@ -128,7 +138,9 @@ describe('Workers Page', () => {
         return jsonResponse(workersPayload)
       }
       if (url === '/api/v1/workers' && method === 'POST') {
-        return jsonResponse({ node_id: 'node-2', command: createCommand })
+        const parsedBody = JSON.parse(String(init?.body ?? '{}'))
+        expect(parsedBody).toEqual({ type: 'normal' })
+        return jsonResponse({ node_id: 'node-2', type: 'normal', command: createCommand })
       }
       throw new Error(`unexpected url: ${url} method=${method}`)
     })
@@ -136,16 +148,16 @@ describe('Workers Page', () => {
 
     const wrapper = await mountApp('/workers')
 
-    const addBtn = wrapper.findAll('button').find((button) => button.text() === 'Add Worker')
-    expect(addBtn).toBeTruthy()
-    await addBtn?.trigger('click')
+    const addBtn = wrapper.find('[data-testid="create-worker-button"]')
+    expect(addBtn.exists()).toBe(true)
+    await addBtn.trigger('click')
     await flushPromises()
     await flushPromises()
 
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/v1/workers')).toBe(true)
     expect(writeText).not.toHaveBeenCalled()
-    expect(wrapper.find('.worker-modal').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Worker Created')
+    expect(document.body.querySelector('.worker-modal')).toBeTruthy()
+    expect(document.body.textContent ?? '').toContain('Worker Created')
 
     wrapper.unmount()
   })
@@ -341,6 +353,8 @@ describe('Workers Page', () => {
 
     const wrapper = await mountApp('/workers')
     try {
+      await wrapper.get('header.h-16 .relative > button').trigger('click')
+      await flushPromises()
       const changePasswordBtn = wrapper
         .findAll('button')
         .find((button) => button.text() === 'Change Password')
@@ -348,14 +362,22 @@ describe('Workers Page', () => {
       await changePasswordBtn?.trigger('click')
       await flushPromises()
 
-      const modal = wrapper.find('.password-modal')
-      expect(modal.exists()).toBe(true)
-      await modal.get('#current-password').setValue('password-test')
-      await modal.get('#new-password').setValue('password-next')
-      await modal.get('form.password-form').trigger('submit.prevent')
+      const modal = document.body.querySelector('.password-modal')
+      expect(modal).toBeTruthy()
+      const currentInput = document.body.querySelector<HTMLInputElement>('#current-password')
+      const newInput = document.body.querySelector<HTMLInputElement>('#new-password')
+      const form = document.body.querySelector<HTMLFormElement>('form.password-form')
+      expect(currentInput).toBeTruthy()
+      expect(newInput).toBeTruthy()
+      expect(form).toBeTruthy()
+      currentInput!.value = 'password-test'
+      currentInput!.dispatchEvent(new Event('input', { bubbles: true }))
+      newInput!.value = 'password-next'
+      newInput!.dispatchEvent(new Event('input', { bubbles: true }))
+      form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
       await flushPromises()
 
-      expect(wrapper.text()).toContain('Password updated successfully.')
+      expect(document.body.textContent ?? '').toContain('Password updated successfully.')
       const passwordCall = fetchMock.mock.calls.find(
         ([url, init]) =>
           String(url) === '/api/v1/console/password' &&
@@ -374,20 +396,29 @@ describe('Workers Page', () => {
     }
   })
 
-  it('redirects non-admin /workers access to /tokens', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  it('allows non-admin workers page and creates worker-sys only', async () => {
+    const createCommand =
+      'WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 WORKER_ID=node-sys-1 WORKER_SECRET=secret-sys-1 WORKER_HEARTBEAT_INTERVAL_SEC=5 WORKER_HEARTBEAT_JITTER_PCT=20 ./path-to-binary'
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      const method = String(init?.method ?? 'GET').toUpperCase()
       if (url === '/api/v1/console/session') {
         return jsonResponse(memberSessionPayload)
       }
-      if (url === '/api/v1/console/tokens') {
-        return jsonResponse({
-          items: [],
-          total: 0,
-        })
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return jsonResponse(statsPayload)
       }
-      if (url.startsWith('/api/v1/workers')) {
-        throw new Error(`workers api should not be called for non-admin: ${url}`)
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
+      }
+      if (url.startsWith('/api/v1/workers?')) {
+        return jsonResponse(workersPayload)
+      }
+      if (url === '/api/v1/workers' && method === 'POST') {
+        const parsedBody = JSON.parse(String(init?.body ?? '{}'))
+        expect(parsedBody).toEqual({ type: 'worker-sys' })
+        return jsonResponse({ node_id: 'node-sys-1', type: 'worker-sys', command: createCommand })
       }
       throw new Error(`unexpected url: ${url}`)
     })
@@ -395,9 +426,14 @@ describe('Workers Page', () => {
 
     const wrapper = await mountApp('/workers')
     try {
-      await waitForRoute('/tokens')
-      expect(router.currentRoute.value.path).toBe('/tokens')
-      expect(wrapper.text()).toContain('Trusted Token Management')
+      expect(router.currentRoute.value.path).toBe('/workers')
+      expect(wrapper.text()).toContain('Create Worker-Sys')
+      const createBtn = wrapper.find('[data-testid="create-worker-button"]')
+      expect(createBtn.exists()).toBe(true)
+      await createBtn.trigger('click')
+      await flushPromises()
+      await flushPromises()
+      expect(document.body.textContent ?? '').toContain('worker-sys')
     } finally {
       wrapper.unmount()
     }

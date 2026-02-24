@@ -2,10 +2,12 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/onlyboxes/onlyboxes/console/internal/grpcserver"
+	"github.com/onlyboxes/onlyboxes/console/internal/registry"
 )
 
 const defaultStaleAfterSec = 30
@@ -40,6 +42,12 @@ type workerInflightResponse struct {
 }
 
 func (h *WorkerHandler) WorkerStats(c *gin.Context) {
+	ownerID, isAdmin, ok := resolveWorkerAccessScope(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	staleAfterSec, ok := parsePositiveIntQuery(c, "stale_after_sec", defaultStaleAfterSec)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "stale_after_sec must be a positive integer"})
@@ -47,7 +55,18 @@ func (h *WorkerHandler) WorkerStats(c *gin.Context) {
 	}
 
 	now := h.nowFn()
-	stats := h.store.Stats(now, h.offlineTTL, time.Duration(staleAfterSec)*time.Second)
+	var stats registry.WorkerStats
+	if isAdmin {
+		stats = h.store.Stats(now, h.offlineTTL, time.Duration(staleAfterSec)*time.Second)
+	} else {
+		stats = h.store.StatsScoped(
+			now,
+			h.offlineTTL,
+			time.Duration(staleAfterSec)*time.Second,
+			ownerID,
+			registry.WorkerTypeSys,
+		)
+	}
 	c.JSON(http.StatusOK, workerStatsResponse{
 		Total:         stats.Total,
 		Online:        stats.Online,
@@ -59,6 +78,12 @@ func (h *WorkerHandler) WorkerStats(c *gin.Context) {
 }
 
 func (h *WorkerHandler) WorkerInflight(c *gin.Context) {
+	ownerID, isAdmin, ok := resolveWorkerAccessScope(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
 	if h.inflightStats == nil {
 		c.JSON(http.StatusOK, workerInflightResponse{
 			Workers:     []workerInflightJSON{},
@@ -68,8 +93,20 @@ func (h *WorkerHandler) WorkerInflight(c *gin.Context) {
 	}
 
 	snapshots := h.inflightStats.InflightStats()
-	workers := make([]workerInflightJSON, len(snapshots))
-	for i, snap := range snapshots {
+	allowedNodeIDs := map[string]struct{}{}
+	if !isAdmin {
+		for _, nodeID := range h.store.ListNodeIDsByOwnerAndType(ownerID, registry.WorkerTypeSys) {
+			allowedNodeIDs[strings.TrimSpace(nodeID)] = struct{}{}
+		}
+	}
+
+	workers := make([]workerInflightJSON, 0, len(snapshots))
+	for _, snap := range snapshots {
+		if !isAdmin {
+			if _, ok := allowedNodeIDs[strings.TrimSpace(snap.NodeID)]; !ok {
+				continue
+			}
+		}
 		entries := make([]capabilityInflightJSON, len(snap.Capabilities))
 		for j, entry := range snap.Capabilities {
 			entries[j] = capabilityInflightJSON{
@@ -78,10 +115,10 @@ func (h *WorkerHandler) WorkerInflight(c *gin.Context) {
 				MaxInflight: entry.MaxInflight,
 			}
 		}
-		workers[i] = workerInflightJSON{
+		workers = append(workers, workerInflightJSON{
 			NodeID:       snap.NodeID,
 			Capabilities: entries,
-		}
+		})
 	}
 	c.JSON(http.StatusOK, workerInflightResponse{
 		Workers:     workers,

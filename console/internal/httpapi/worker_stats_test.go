@@ -9,8 +9,21 @@ import (
 	"time"
 
 	registryv1 "github.com/onlyboxes/onlyboxes/api/gen/go/registry/v1"
+	"github.com/onlyboxes/onlyboxes/console/internal/grpcserver"
+	"github.com/onlyboxes/onlyboxes/console/internal/registry"
 	"github.com/onlyboxes/onlyboxes/console/internal/testutil/registrytest"
 )
+
+type staticInflightProvider struct {
+	snapshots []grpcserver.WorkerInflightSnapshot
+}
+
+func (p *staticInflightProvider) InflightStats() []grpcserver.WorkerInflightSnapshot {
+	if p == nil {
+		return nil
+	}
+	return p.snapshots
+}
 
 func TestWorkerStatsAggregatesAllWorkers(t *testing.T) {
 	store := registrytest.NewStore(t)
@@ -111,5 +124,87 @@ func TestWorkerStatsRejectsInvalidStaleThreshold(t *testing.T) {
 
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", res.Code)
+	}
+}
+
+func TestWorkerStatsAndInflightAreOwnerScopedForNonAdmin(t *testing.T) {
+	store := registrytest.NewStore(t)
+	now := time.Unix(1_700_000_700, 0)
+	if err := store.Upsert(&registryv1.ConnectHello{
+		NodeId: "node-own-sys",
+		Labels: map[string]string{
+			registry.LabelOwnerIDKey:    "acc-member-1",
+			registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+		},
+	}, "session-own-sys", now.Add(-5*time.Second)); err != nil {
+		t.Fatalf("seed own sys worker: %v", err)
+	}
+	if err := store.Upsert(&registryv1.ConnectHello{
+		NodeId: "node-other-sys",
+		Labels: map[string]string{
+			registry.LabelOwnerIDKey:    "acc-other-1",
+			registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+		},
+	}, "session-other-sys", now.Add(-5*time.Second)); err != nil {
+		t.Fatalf("seed other sys worker: %v", err)
+	}
+
+	consoleAuth := newTestConsoleAuth(t)
+	seedTestAccount(consoleAuth.queries, "acc-member-1", "member-test", "member-password", false)
+	handler := NewWorkerHandler(
+		store,
+		15*time.Second,
+		nil,
+		nil,
+		&staticInflightProvider{
+			snapshots: []grpcserver.WorkerInflightSnapshot{
+				{
+					NodeID: "node-own-sys",
+					Capabilities: []grpcserver.CapabilityInflightEntry{
+						{Name: "computeruse", Inflight: 1, MaxInflight: 1},
+					},
+				},
+				{
+					NodeID: "node-other-sys",
+					Capabilities: []grpcserver.CapabilityInflightEntry{
+						{Name: "computeruse", Inflight: 0, MaxInflight: 1},
+					},
+				},
+			},
+		},
+		"",
+	)
+	handler.nowFn = func() time.Time { return now }
+	router := NewRouter(handler, consoleAuth, newTestMCPAuth())
+	cookie := loginSessionCookieFor(t, router, "member-test", "member-password")
+
+	statsReq := httptest.NewRequest(http.MethodGet, "/api/v1/workers/stats", nil)
+	statsReq.AddCookie(cookie)
+	statsRes := httptest.NewRecorder()
+	router.ServeHTTP(statsRes, statsReq)
+	if statsRes.Code != http.StatusOK {
+		t.Fatalf("expected stats 200, got %d body=%s", statsRes.Code, statsRes.Body.String())
+	}
+	statsPayload := workerStatsResponse{}
+	if err := json.Unmarshal(statsRes.Body.Bytes(), &statsPayload); err != nil {
+		t.Fatalf("decode stats response: %v", err)
+	}
+	if statsPayload.Total != 1 {
+		t.Fatalf("expected scoped total=1, got %d", statsPayload.Total)
+	}
+
+	inflightReq := httptest.NewRequest(http.MethodGet, "/api/v1/workers/inflight", nil)
+	inflightReq.AddCookie(cookie)
+	inflightRes := httptest.NewRecorder()
+	router.ServeHTTP(inflightRes, inflightReq)
+	if inflightRes.Code != http.StatusOK {
+		t.Fatalf("expected inflight 200, got %d body=%s", inflightRes.Code, inflightRes.Body.String())
+	}
+	inflightPayload := workerInflightResponse{}
+	if err := json.Unmarshal(inflightRes.Body.Bytes(), &inflightPayload); err != nil {
+		t.Fatalf("decode inflight response: %v", err)
+	}
+	if len(inflightPayload.Workers) != 1 || inflightPayload.Workers[0].NodeID != "node-own-sys" {
+		t.Fatalf("expected scoped inflight worker list, got %#v", inflightPayload.Workers)
 	}
 }

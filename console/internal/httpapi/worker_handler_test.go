@@ -11,6 +11,8 @@ import (
 	"time"
 
 	registryv1 "github.com/onlyboxes/onlyboxes/api/gen/go/registry/v1"
+	"github.com/onlyboxes/onlyboxes/console/internal/grpcserver"
+	"github.com/onlyboxes/onlyboxes/console/internal/registry"
 	"github.com/onlyboxes/onlyboxes/console/internal/testutil/registrytest"
 )
 
@@ -19,6 +21,8 @@ type fakeWorkerProvisioning struct {
 	createNodeID string
 	createSecret string
 	createErr    error
+	lastOwnerID  string
+	lastType     string
 }
 
 func (p *fakeWorkerProvisioning) GetWorkerSecret(nodeID string) (string, bool) {
@@ -29,10 +33,12 @@ func (p *fakeWorkerProvisioning) GetWorkerSecret(nodeID string) (string, bool) {
 	return secret, ok
 }
 
-func (p *fakeWorkerProvisioning) CreateProvisionedWorker(_ time.Time, _ time.Duration) (string, string, error) {
+func (p *fakeWorkerProvisioning) CreateProvisionedWorkerForOwner(ownerID string, workerType string, _ time.Time, _ time.Duration) (string, string, error) {
 	if p == nil {
 		return "", "", errors.New("provisioning unavailable")
 	}
+	p.lastOwnerID = ownerID
+	p.lastType = workerType
 	if p.createErr != nil {
 		return "", "", p.createErr
 	}
@@ -163,7 +169,7 @@ func TestCreateWorkerSuccess(t *testing.T) {
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 	cookie := loginSessionCookie(t, router)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workers", strings.NewReader("{}"))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workers", strings.NewReader(`{"type":"normal"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Host = "console.local:8089"
 	req.AddCookie(cookie)
@@ -181,11 +187,20 @@ func TestCreateWorkerSuccess(t *testing.T) {
 	if payload.NodeID != "node-new-1" {
 		t.Fatalf("expected node_id node-new-1, got %q", payload.NodeID)
 	}
+	if payload.Type != registry.WorkerTypeNormal {
+		t.Fatalf("expected type %q, got %q", registry.WorkerTypeNormal, payload.Type)
+	}
 	if !strings.Contains(payload.Command, "WORKER_ID=node-new-1") {
 		t.Fatalf("expected WORKER_ID in command, got %q", payload.Command)
 	}
 	if !strings.Contains(payload.Command, "WORKER_SECRET=secret-new-1") {
 		t.Fatalf("expected WORKER_SECRET in command, got %q", payload.Command)
+	}
+	if provisioning.lastType != registry.WorkerTypeNormal {
+		t.Fatalf("expected provisioning type %q, got %q", registry.WorkerTypeNormal, provisioning.lastType)
+	}
+	if strings.TrimSpace(provisioning.lastOwnerID) == "" {
+		t.Fatalf("expected non-empty owner id for created worker")
 	}
 }
 
@@ -193,13 +208,178 @@ func TestCreateWorkerRequiresAuthentication(t *testing.T) {
 	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, &fakeWorkerProvisioning{}, nil, ":50051")
 	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workers", strings.NewReader("{}"))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workers", strings.NewReader(`{"type":"worker-sys"}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestCreateWorkerRejectsMissingType(t *testing.T) {
+	provisioning := &fakeWorkerProvisioning{createNodeID: "node-new-1", createSecret: "secret-new-1"}
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, nil, ":50051")
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
+	cookie := loginSessionCookie(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workers", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestCreateWorkerRejectsNormalTypeForNonAdmin(t *testing.T) {
+	consoleAuth := newTestConsoleAuth(t)
+	seedTestAccount(consoleAuth.queries, "acc-member-1", "member-test", "member-password", false)
+	provisioning := &fakeWorkerProvisioning{createNodeID: "node-new-1", createSecret: "secret-new-1"}
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, nil, ":50051")
+	router := NewRouter(handler, consoleAuth, newTestMCPAuth())
+	cookie := loginSessionCookieFor(t, router, "member-test", "member-password")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workers", strings.NewReader(`{"type":"normal"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestCreateWorkerMapsWorkerSysConflict(t *testing.T) {
+	provisioning := &fakeWorkerProvisioning{
+		createErr: grpcserver.ErrWorkerSysAlreadyExists,
+	}
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, provisioning, nil, ":50051")
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
+	cookie := loginSessionCookie(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workers", strings.NewReader(`{"type":"worker-sys"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestListWorkersScopesToOwnWorkerSysForNonAdmin(t *testing.T) {
+	store := registrytest.NewStore(t)
+	now := time.Unix(1_700_000_200, 0)
+	if err := store.Upsert(&registryv1.ConnectHello{
+		NodeId: "node-own-sys",
+		Labels: map[string]string{
+			registry.LabelOwnerIDKey:    "acc-member-1",
+			registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+		},
+	}, "session-own-sys", now); err != nil {
+		t.Fatalf("seed own sys worker: %v", err)
+	}
+	if err := store.Upsert(&registryv1.ConnectHello{
+		NodeId: "node-own-normal",
+		Labels: map[string]string{
+			registry.LabelOwnerIDKey:    "acc-member-1",
+			registry.LabelWorkerTypeKey: registry.WorkerTypeNormal,
+		},
+	}, "session-own-normal", now); err != nil {
+		t.Fatalf("seed own normal worker: %v", err)
+	}
+	if err := store.Upsert(&registryv1.ConnectHello{
+		NodeId: "node-other-sys",
+		Labels: map[string]string{
+			registry.LabelOwnerIDKey:    "acc-other-1",
+			registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+		},
+	}, "session-other-sys", now); err != nil {
+		t.Fatalf("seed other sys worker: %v", err)
+	}
+
+	consoleAuth := newTestConsoleAuth(t)
+	seedTestAccount(consoleAuth.queries, "acc-member-1", "member-test", "member-password", false)
+	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, nil, "")
+	handler.nowFn = func() time.Time { return now }
+	router := NewRouter(handler, consoleAuth, newTestMCPAuth())
+	cookie := loginSessionCookieFor(t, router, "member-test", "member-password")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers", nil)
+	req.AddCookie(cookie)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", res.Code, res.Body.String())
+	}
+	payload := listWorkersResponse{}
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Total != 1 || len(payload.Items) != 1 {
+		t.Fatalf("expected only own worker-sys item, got total=%d len=%d", payload.Total, len(payload.Items))
+	}
+	if payload.Items[0].NodeID != "node-own-sys" {
+		t.Fatalf("expected node-own-sys, got %s", payload.Items[0].NodeID)
+	}
+}
+
+func TestDeleteWorkerScopesToOwnWorkerSysForNonAdmin(t *testing.T) {
+	store := registrytest.NewStore(t)
+	now := time.Unix(1_700_000_250, 0)
+	if err := store.Upsert(&registryv1.ConnectHello{
+		NodeId: "node-own-sys",
+		Labels: map[string]string{
+			registry.LabelOwnerIDKey:    "acc-member-1",
+			registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+		},
+	}, "session-own-sys", now); err != nil {
+		t.Fatalf("seed own sys worker: %v", err)
+	}
+	if err := store.Upsert(&registryv1.ConnectHello{
+		NodeId: "node-own-normal",
+		Labels: map[string]string{
+			registry.LabelOwnerIDKey:    "acc-member-1",
+			registry.LabelWorkerTypeKey: registry.WorkerTypeNormal,
+		},
+	}, "session-own-normal", now); err != nil {
+		t.Fatalf("seed own normal worker: %v", err)
+	}
+
+	consoleAuth := newTestConsoleAuth(t)
+	seedTestAccount(consoleAuth.queries, "acc-member-1", "member-test", "member-password", false)
+	provisioning := &fakeWorkerProvisioning{
+		secrets: map[string]string{
+			"node-own-sys":    "secret-own-sys",
+			"node-own-normal": "secret-own-normal",
+		},
+	}
+	handler := NewWorkerHandler(store, 15*time.Second, nil, provisioning, nil, "")
+	handler.nowFn = func() time.Time { return now }
+	router := NewRouter(handler, consoleAuth, newTestMCPAuth())
+	cookie := loginSessionCookieFor(t, router, "member-test", "member-password")
+
+	reqOwnSys := httptest.NewRequest(http.MethodDelete, "/api/v1/workers/node-own-sys", nil)
+	reqOwnSys.AddCookie(cookie)
+	resOwnSys := httptest.NewRecorder()
+	router.ServeHTTP(resOwnSys, reqOwnSys)
+	if resOwnSys.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for own worker-sys, got %d body=%s", resOwnSys.Code, resOwnSys.Body.String())
+	}
+
+	reqOwnNormal := httptest.NewRequest(http.MethodDelete, "/api/v1/workers/node-own-normal", nil)
+	reqOwnNormal.AddCookie(cookie)
+	resOwnNormal := httptest.NewRecorder()
+	router.ServeHTTP(resOwnNormal, reqOwnNormal)
+	if resOwnNormal.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for own normal worker, got %d body=%s", resOwnNormal.Code, resOwnNormal.Body.String())
 	}
 }
 

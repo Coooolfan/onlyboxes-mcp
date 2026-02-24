@@ -159,6 +159,65 @@ func handleMCPTerminalExecTool(ctx context.Context, dispatcher CommandDispatcher
 	}
 }
 
+func handleMCPComputerUseTool(ctx context.Context, dispatcher CommandDispatcher, input mcpComputerUseToolInput) (*mcp.CallToolResult, mcpComputerUseToolOutput, error) {
+	if strings.TrimSpace(input.Command) == "" {
+		return nil, mcpComputerUseToolOutput{}, invalidParamsError("command is required")
+	}
+
+	timeoutMS := defaultMCPTaskTimeoutMS
+	if input.TimeoutMS != nil {
+		timeoutMS = *input.TimeoutMS
+	}
+	if timeoutMS < minMCPTaskTimeoutMS || timeoutMS > maxMCPPythonExecTimeoutMS {
+		return nil, mcpComputerUseToolOutput{}, invalidParamsError("timeout_ms must be between 1 and 600000")
+	}
+	if dispatcher == nil {
+		return nil, mcpComputerUseToolOutput{}, errors.New("task dispatcher is unavailable")
+	}
+	ownerID := requestOwnerIDFromContext(ctx)
+	if ownerID == "" {
+		return nil, mcpComputerUseToolOutput{}, errors.New("request owner is required")
+	}
+
+	payloadJSON, err := json.Marshal(computerUsePayload{Command: input.Command})
+	if err != nil {
+		return nil, mcpComputerUseToolOutput{}, errors.New("failed to encode computerUse payload")
+	}
+
+	result, err := dispatcher.SubmitTask(ctx, grpcserver.SubmitTaskRequest{
+		Capability: computerUseCapabilityName,
+		InputJSON:  payloadJSON,
+		Mode:       grpcserver.TaskModeSync,
+		Timeout:    time.Duration(timeoutMS) * time.Millisecond,
+		RequestID:  strings.TrimSpace(input.RequestID),
+		OwnerID:    ownerID,
+	})
+	if err != nil {
+		return nil, mcpComputerUseToolOutput{}, mapMCPToolTaskSubmitError(err)
+	}
+	if !result.Completed {
+		return nil, mcpComputerUseToolOutput{}, errors.New("computerUse task did not complete")
+	}
+
+	task := result.Task
+	switch task.Status {
+	case grpcserver.TaskStatusSucceeded:
+		decoded := mcpComputerUseToolOutput{}
+		if err := json.Unmarshal(task.ResultJSON, &decoded); err != nil {
+			return nil, mcpComputerUseToolOutput{}, errors.New("invalid computerUse result payload")
+		}
+		return nil, decoded, nil
+	case grpcserver.TaskStatusTimeout:
+		return nil, mcpComputerUseToolOutput{}, errors.New("task timed out")
+	case grpcserver.TaskStatusCanceled:
+		return nil, mcpComputerUseToolOutput{}, errors.New("task canceled")
+	case grpcserver.TaskStatusFailed:
+		return nil, mcpComputerUseToolOutput{}, formatTaskFailureError(task)
+	default:
+		return nil, mcpComputerUseToolOutput{}, fmt.Errorf("unexpected task status: %s", task.Status)
+	}
+}
+
 func handleMCPReadImageTool(ctx context.Context, dispatcher CommandDispatcher, input mcpReadImageToolInput) (*mcp.CallToolResult, any, error) {
 	sessionID := strings.TrimSpace(input.SessionID)
 	if sessionID == "" {

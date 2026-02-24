@@ -26,6 +26,8 @@ const (
 	defaultCommandDispatchTimeout = 60 * time.Second
 	defaultTerminalRouteTTL       = 30 * time.Minute
 	terminalRoutePruneMinInterval = 1 * time.Minute
+	computerUseCapabilityName     = "computeruse"
+	computerUseCapabilityDeclared = "computerUse"
 )
 
 var ErrNoEchoWorker = errors.New("no online worker supports echo")

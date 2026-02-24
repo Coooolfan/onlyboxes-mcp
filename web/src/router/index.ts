@@ -30,7 +30,6 @@ const router = createRouter({
       component: () => import('@/views/WorkersPage.vue'),
       meta: {
         requiresAuth: true,
-        requiresAdmin: true,
         layout: 'dashboard',
       },
     },

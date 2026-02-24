@@ -56,6 +56,31 @@ func (q *Queries) ClearWorkerSessionByNodeAndSession(ctx context.Context, arg Cl
 	return result.RowsAffected()
 }
 
+const countWorkerNodesByOwnerAndType = `-- name: CountWorkerNodesByOwnerAndType :one
+SELECT COUNT(1)
+FROM worker_nodes wn
+JOIN worker_labels owner_label
+  ON owner_label.node_id = wn.node_id
+  AND owner_label.label_key = 'obx.owner_id'
+JOIN worker_labels type_label
+  ON type_label.node_id = wn.node_id
+  AND type_label.label_key = 'obx.worker_type'
+WHERE owner_label.label_value = ?
+  AND type_label.label_value = ?
+`
+
+type CountWorkerNodesByOwnerAndTypeParams struct {
+	LabelValue   string `json:"label_value"`
+	LabelValue_2 string `json:"label_value_2"`
+}
+
+func (q *Queries) CountWorkerNodesByOwnerAndType(ctx context.Context, arg CountWorkerNodesByOwnerAndTypeParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countWorkerNodesByOwnerAndType, arg.LabelValue, arg.LabelValue_2)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteOfflineRuntimeWorkers = `-- name: DeleteOfflineRuntimeWorkers :execrows
 DELETE FROM worker_nodes
 WHERE provisioned = 0
@@ -281,6 +306,29 @@ func (q *Queries) InsertWorkerLabel(ctx context.Context, arg InsertWorkerLabelPa
 	return err
 }
 
+const insertWorkerSysOwnerClaimIfAbsent = `-- name: InsertWorkerSysOwnerClaimIfAbsent :execrows
+INSERT INTO worker_sys_owner_claims (
+    owner_id,
+    node_id,
+    claimed_at_unix_ms
+) VALUES (?, ?, ?)
+ON CONFLICT(owner_id) DO NOTHING
+`
+
+type InsertWorkerSysOwnerClaimIfAbsentParams struct {
+	OwnerID         string `json:"owner_id"`
+	NodeID          string `json:"node_id"`
+	ClaimedAtUnixMs int64  `json:"claimed_at_unix_ms"`
+}
+
+func (q *Queries) InsertWorkerSysOwnerClaimIfAbsent(ctx context.Context, arg InsertWorkerSysOwnerClaimIfAbsentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertWorkerSysOwnerClaimIfAbsent, arg.OwnerID, arg.NodeID, arg.ClaimedAtUnixMs)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const listOnlineWorkerNodeIDsByCapability = `-- name: ListOnlineWorkerNodeIDsByCapability :many
 SELECT wn.node_id
 FROM worker_nodes wn
@@ -298,6 +346,60 @@ type ListOnlineWorkerNodeIDsByCapabilityParams struct {
 
 func (q *Queries) ListOnlineWorkerNodeIDsByCapability(ctx context.Context, arg ListOnlineWorkerNodeIDsByCapabilityParams) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listOnlineWorkerNodeIDsByCapability, arg.CapabilityName, arg.LastSeenAtUnixMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var node_id string
+		if err := rows.Scan(&node_id); err != nil {
+			return nil, err
+		}
+		items = append(items, node_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOnlineWorkerNodeIDsByOwnerTypeAndCapability = `-- name: ListOnlineWorkerNodeIDsByOwnerTypeAndCapability :many
+SELECT wn.node_id
+FROM worker_nodes wn
+JOIN worker_capabilities wc
+  ON wc.node_id = wn.node_id
+JOIN worker_labels owner_label
+  ON owner_label.node_id = wn.node_id
+  AND owner_label.label_key = 'obx.owner_id'
+JOIN worker_labels type_label
+  ON type_label.node_id = wn.node_id
+  AND type_label.label_key = 'obx.worker_type'
+WHERE LOWER(wc.capability_name) = ?
+  AND owner_label.label_value = ?
+  AND type_label.label_value = ?
+  AND wn.last_seen_at_unix_ms >= ?
+  AND wn.session_id <> ''
+ORDER BY wn.node_id ASC
+`
+
+type ListOnlineWorkerNodeIDsByOwnerTypeAndCapabilityParams struct {
+	CapabilityName   string `json:"capability_name"`
+	LabelValue       string `json:"label_value"`
+	LabelValue_2     string `json:"label_value_2"`
+	LastSeenAtUnixMs int64  `json:"last_seen_at_unix_ms"`
+}
+
+func (q *Queries) ListOnlineWorkerNodeIDsByOwnerTypeAndCapability(ctx context.Context, arg ListOnlineWorkerNodeIDsByOwnerTypeAndCapabilityParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listOnlineWorkerNodeIDsByOwnerTypeAndCapability,
+		arg.CapabilityName,
+		arg.LabelValue,
+		arg.LabelValue_2,
+		arg.LastSeenAtUnixMs,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -487,6 +589,48 @@ func (q *Queries) ListWorkerLabelsByNode(ctx context.Context, nodeID string) ([]
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkerNodeIDsByOwnerAndType = `-- name: ListWorkerNodeIDsByOwnerAndType :many
+SELECT wn.node_id
+FROM worker_nodes wn
+JOIN worker_labels owner_label
+  ON owner_label.node_id = wn.node_id
+  AND owner_label.label_key = 'obx.owner_id'
+JOIN worker_labels type_label
+  ON type_label.node_id = wn.node_id
+  AND type_label.label_key = 'obx.worker_type'
+WHERE owner_label.label_value = ?
+  AND type_label.label_value = ?
+ORDER BY wn.node_id ASC
+`
+
+type ListWorkerNodeIDsByOwnerAndTypeParams struct {
+	LabelValue   string `json:"label_value"`
+	LabelValue_2 string `json:"label_value_2"`
+}
+
+func (q *Queries) ListWorkerNodeIDsByOwnerAndType(ctx context.Context, arg ListWorkerNodeIDsByOwnerAndTypeParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listWorkerNodeIDsByOwnerAndType, arg.LabelValue, arg.LabelValue_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var node_id string
+		if err := rows.Scan(&node_id); err != nil {
+			return nil, err
+		}
+		items = append(items, node_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

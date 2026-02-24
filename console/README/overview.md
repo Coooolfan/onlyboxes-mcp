@@ -7,16 +7,27 @@ The console service hosts:
   - `GET /assets/*` serves bundled static assets.
   - unknown `GET/HEAD` routes return `404 Not Found`.
   - `/api/*` and `/mcp` are reserved for backend handlers and are not served as frontend pages.
-- REST APIs for worker data (dashboard authentication + admin required):
+- REST APIs for worker data (dashboard authentication, role-scoped):
   - `GET /api/v1/workers` for paginated worker listing.
   - `GET /api/v1/workers/stats` for aggregated worker status metrics.
-  - `POST /api/v1/workers` for creating a provisioned worker (`worker_id` + `worker_secret`) and returning its startup command.
+  - `POST /api/v1/workers` for creating provisioned worker credentials and returning startup command.
   - `DELETE /api/v1/workers/:node_id` for deleting a provisioned worker and revoking its credential (online worker is disconnected immediately).
   - `GET /api/v1/workers/:node_id/startup-command` always returns `410 Gone`.
   - `worker_secret` is returned once in `POST /api/v1/workers` response and is not queryable from read APIs.
+  - worker types:
+    - `normal` (maps to `worker-docker`)
+    - `worker-sys` (maps to host-shell worker)
+  - worker create/delete visibility rules:
+    - admin: list/stats/inflight/delete all workers; create `normal` and `worker-sys`
+    - non-admin: list/stats/inflight only own `worker-sys`; can create/delete only own `worker-sys`
+  - `worker-sys` constraints:
+    - max one per account
+    - only `computerUse` capability is accepted
+    - `computerUse.max_inflight` is forced to `1`
 - command APIs (execution, token whitelist required):
   - `POST /api/v1/commands/echo` for blocking echo command execution.
   - `POST /api/v1/commands/terminal` for blocking terminal command execution over `terminalExec` capability.
+  - `POST /api/v1/commands/computer-use` for blocking host-shell execution over `computerUse` capability.
   - `POST /api/v1/tasks` for sync/async/auto task submission.
   - `GET /api/v1/tasks/:task_id` for task status and result lookup.
   - `POST /api/v1/tasks/:task_id/cancel` for best-effort task cancellation.
@@ -52,6 +63,14 @@ The console service hosts:
       - `lease_ttl_sec` is optional and validated by worker-side lease bounds.
       - `timeout_ms` is optional, range `1..600000`, default `60000`.
       - output: `{"session_id":"...","created":true,"stdout":"...","stderr":"...","exit_code":0,"stdout_truncated":false,"stderr_truncated":false,"lease_expires_unix_ms":...}`
+    - `computerUse`
+      - input: `{"command":"pwd","timeout_ms":60000,"request_id":"optional"}`
+      - `command` is required (whitespace-only is rejected).
+      - legacy `lease_ttl_sec` is ignored when provided.
+      - payload excludes terminal session fields (`session_id`, `create_if_missing`, `created`).
+      - routed only to caller-owned `worker-sys` and account-scoped capacity is single-flight.
+      - worker-side local single-flight guard is also enforced; concurrent dispatch while busy returns `session_busy` (HTTP `409` in command API).
+      - output: `{"stdout":"...","stderr":"...","exit_code":0,"stdout_truncated":false,"stderr_truncated":false}`
     - `readImage`
       - input: `{"session_id":"required","file_path":"required","timeout_ms":60000}`
       - `session_id` and `file_path` are required (whitespace-only is rejected).
@@ -89,10 +108,11 @@ Security warning (high risk):
 
 Credential behavior:
 - `console` starts with `0` workers.
-- worker credentials are generated on demand by dashboard/API `POST /api/v1/workers`.
+- worker credentials are generated on demand by dashboard/API `POST /api/v1/workers` with explicit `type`.
 - credentials are persisted in SQLite as HMAC-SHA256 hashes only (no plaintext storage).
 - deleting a provisioned worker revokes the credential immediately; if the worker is online, its current session is closed.
 - worker secret is returned only once when creating worker; recovery path is delete + recreate.
+- each account can own at most one `worker-sys`.
 
 Defaults:
 - HTTP: `:8089`

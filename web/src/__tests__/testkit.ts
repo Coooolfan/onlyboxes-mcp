@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 
 import App from '../App.vue'
 import router from '../router'
@@ -134,6 +134,7 @@ export function unauthorizedResponse() {
 
 export async function mountApp(path: string) {
   const pinia = createPinia()
+  setActivePinia(pinia)
   const wrapper = mount(App, {
     global: {
       plugins: [pinia, router],
@@ -141,18 +142,27 @@ export async function mountApp(path: string) {
   })
 
   await router.push('/login')
-  await flushPromises()
+  await settleUI()
   await router.push(path)
-  await flushPromises()
+  await settleUI()
 
   return wrapper
 }
 
-export async function waitForRoute(path: string, maxAttempts = 8) {
+export async function waitForRoute(path: string, maxAttempts = 30) {
   for (let i = 0; i < maxAttempts; i += 1) {
     if (router.currentRoute.value.path === path) {
       return
     }
+    await flushPromises()
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0)
+    })
+  }
+}
+
+async function settleUI(rounds = 4) {
+  for (let i = 0; i < rounds; i += 1) {
     await flushPromises()
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0)

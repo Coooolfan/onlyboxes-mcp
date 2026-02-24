@@ -163,27 +163,55 @@ jobs:
             os_name: linux
             goos: linux
             goarch: amd64
+            worker_name: worker-docker
+          - os: ubuntu-24.04
+            arch: x64
+            os_name: linux
+            goos: linux
+            goarch: amd64
+            worker_name: worker-sys
           - os: ubuntu-24.04-arm
             arch: arm64
             os_name: linux
             goos: linux
             goarch: arm64
+            worker_name: worker-docker
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            os_name: linux
+            goos: linux
+            goarch: arm64
+            worker_name: worker-sys
           - os: macos-15-intel
             arch: x64
             os_name: macos
             goos: darwin
             goarch: amd64
+            worker_name: worker-docker
+          - os: macos-15-intel
+            arch: x64
+            os_name: macos
+            goos: darwin
+            goarch: amd64
+            worker_name: worker-sys
           - os: macos-15
             arch: arm64
             os_name: macos
             goos: darwin
             goarch: arm64
+            worker_name: worker-docker
+          - os: macos-15
+            arch: arm64
+            os_name: macos
+            goos: darwin
+            goarch: arm64
+            worker_name: worker-sys
     env:
       VERSION_RAW: ${{ needs.resolve-version.outputs.version_raw }}
       VERSION_SAFE: ${{ needs.resolve-version.outputs.version_safe }}
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
-      WORKER_BIN: onlyboxes-worker-docker_${{ needs.resolve-version.outputs.version_safe }}_${{ matrix.os_name }}_${{ matrix.goarch }}
+      WORKER_BIN: onlyboxes-${{ matrix.worker_name }}_${{ needs.resolve-version.outputs.version_safe }}_${{ matrix.os_name }}_${{ matrix.goarch }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -194,18 +222,18 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
-          cache-dependency-path: worker/worker-docker/go.sum
+          cache-dependency-path: worker/${{ matrix.worker_name }}/go.sum
 
       - name: Build worker binary
         run: |
           set -euo pipefail
           mkdir -p build
           (
-            cd worker/worker-docker
+            cd worker/${{ matrix.worker_name }}
             CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -trimpath \
-              -ldflags "-X github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/buildinfo.Version=${VERSION_RAW}" \
+              -ldflags "-X github.com/onlyboxes/onlyboxes/worker/${{ matrix.worker_name }}/internal/buildinfo.Version=${VERSION_RAW}" \
               -o "../../build/${WORKER_BIN}" \
-              ./cmd/worker-docker
+              ./cmd/${{ matrix.worker_name }}
           )
 
       - name: Validate worker binary architecture
@@ -235,7 +263,7 @@ jobs:
       - name: Upload worker workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onlyboxes-worker-docker-${{ matrix.os_name }}-${{ matrix.arch }}-${{ env.VERSION_SAFE }}.zip
+          name: onlyboxes-${{ matrix.worker_name }}-${{ matrix.os_name }}-${{ matrix.arch }}-${{ env.VERSION_SAFE }}.zip
           path: build/${{ env.WORKER_BIN }}
           if-no-files-found: error
 

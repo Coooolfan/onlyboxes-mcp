@@ -26,7 +26,7 @@ Onlyboxes 有两套鉴权路径：
   - `/api/v1/console/register`
   - `/api/v1/console/accounts*`
   - `/api/v1/console/tokens*`
-  - `/api/v1/workers*`（管理员路由）
+  - `/api/v1/workers*`（按角色作用域）
 - 会话有效期为 12 小时（内存态）；console 重启后会话全部失效。
 
 ### 1.2 访问令牌（Bearer）
@@ -300,7 +300,23 @@ Token 按账号隔离；每个账号只能管理自己的 token。
 }
 ```
 
-## 5. Worker 管理 API（管理员 + 控制台会话鉴权）
+## 5. Worker 管理 API（控制台会话鉴权，按角色作用域）
+
+Worker 类型：
+
+- `normal`（对应 `worker-docker`）
+- `worker-sys`（对应 `worker-sys`）
+
+权限矩阵：
+
+- 管理员：
+  - list/stats/inflight：查看全部
+  - delete：可删任意 worker
+  - create：可创建 `normal` 与 `worker-sys`
+- 普通用户：
+  - list/stats/inflight：仅本人 `worker-sys`
+  - delete：仅本人 `worker-sys`（其他目标返回 `404`）
+  - create：仅可创建 `worker-sys`，且每账号最多一个
 
 ### 5.1 查询 Worker 列表
 
@@ -324,7 +340,11 @@ Token 按账号隔离；每个账号只能管理自己的 token。
       "capabilities": [
         { "name": "echo", "max_inflight": 4 }
       ],
-      "labels": { "region": "us" },
+      "labels": {
+        "region": "us",
+        "obx.owner_id": "acc_xxx",
+        "obx.worker_type": "normal"
+      },
       "version": "v0.1.0",
       "status": "online",
       "registered_at": "2026-02-21T00:00:00Z",
@@ -362,6 +382,8 @@ Token 按账号隔离；每个账号只能管理自己的 token。
 }
 ```
 
+说明：普通用户响应仅统计本人 `worker-sys`。
+
 ### 5.3 Worker 并发占用统计
 
 `GET /api/v1/workers/inflight`
@@ -382,17 +404,32 @@ Token 按账号隔离；每个账号只能管理自己的 token。
 }
 ```
 
+说明：普通用户响应仅包含本人 `worker-sys`。
+
 ### 5.4 创建 Worker 凭据
 
 `POST /api/v1/workers`
 
-请求体：无。
+请求体：
+
+```json
+{
+  "type": "normal"
+}
+```
+
+规则：
+
+- `type` 必填，取值 `normal|worker-sys`
+- 仅管理员可创建 `normal`
+- 每个账号最多创建一个 `worker-sys`
 
 成功 `201`：
 
 ```json
 {
   "node_id": "2f51f8f9-77f2-4c1a-a4f5-2036fc9fcb9e",
+  "type": "normal",
   "command": "WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 WORKER_ID=... WORKER_SECRET=... WORKER_HEARTBEAT_INTERVAL_SEC=5 WORKER_HEARTBEAT_JITTER_PCT=20 ./path-to-binary"
 }
 ```
@@ -404,6 +441,9 @@ Token 按账号隔离；每个账号只能管理自己的 token。
 
 错误：
 
+- `400` 请求体不合法 / `type` 非法
+- `403` 普通用户创建 `normal`
+- `409` 当前账号已存在 `worker-sys`
 - `503` provisioning 不可用
 - `500` 创建失败
 
@@ -414,7 +454,7 @@ Token 按账号隔离；每个账号只能管理自己的 token。
 响应：
 
 - `204` 删除成功
-- `404` worker 不存在
+- `404` worker 不存在（普通用户删除越权目标也返回 `404`）
 - `400` 缺少 `node_id`
 - `503` provisioning 不可用
 
@@ -509,6 +549,50 @@ Token 按账号隔离；每个账号只能管理自己的 token。
 - `409` `session_busy` 或任务被取消
 - `429` 无可用并发容量
 - `503` 无可用 worker
+- `504` 超时
+- `502` 其他执行失败
+
+### 6.3 Computer Use 命令
+
+`POST /api/v1/commands/computer-use`
+
+请求：
+
+```json
+{
+  "command": "pwd",
+  "timeout_ms": 60000,
+  "request_id": "optional-idempotency-key"
+}
+```
+
+约束：
+
+- `command` 必填，trim 后不能为空
+- `timeout_ms` 可选，范围 `1..600000`，默认 `60000`
+- `request_id` 可选，幂等键（按账号隔离）
+- 兼容旧客户端时，传入 `lease_ttl_sec` 会被忽略
+- 调度只会路由到调用账号自己的 `worker-sys`
+- 单账号并发固定为 1（`max_inflight=1`）
+
+成功 `200`：
+
+```json
+{
+  "stdout": "...",
+  "stderr": "...",
+  "exit_code": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false
+}
+```
+
+错误：
+
+- `400` 请求参数非法或 `invalid_payload`
+- `409` worker `session_busy` 或任务被取消
+- `429` 无可用并发容量（`no_capacity`）
+- `503` 当前账号无在线 `worker-sys`（`no_worker`）
 - `504` 超时
 - `502` 其他执行失败
 
@@ -721,6 +805,36 @@ Task 所有权按账号隔离（由 token 对应账号决定）。
 }
 ```
 
+#### 工具：`computerUse`
+
+输入：
+
+```json
+{
+  "command": "pwd",
+  "timeout_ms": 60000,
+  "request_id": "optional-idempotency-key"
+}
+```
+
+- `command` 必填
+- `timeout_ms` 可选，`1..600000`，默认 `60000`
+- `request_id` 可选，幂等键（账号维度）
+- 只会路由到调用账号自己的 `worker-sys`
+- 不包含终端会话字段（`session_id`、`create_if_missing`、`created`）
+
+输出：
+
+```json
+{
+  "stdout": "...",
+  "stderr": "...",
+  "exit_code": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false
+}
+```
+
 #### 工具：`readImage`
 
 输入：
@@ -787,6 +901,8 @@ Console 回包：
 
 - 当前版本 console gRPC 不提供内建 TLS/mTLS。
 - `worker-docker` 默认会拒绝不安全 console 端点，只有显式设置 `WORKER_CONSOLE_INSECURE=true` 才允许明文连接。
+- `worker-sys` 的 `computerUse` 在宿主机直接执行 `/bin/sh -lc`，不提供容器隔离。
+- `worker-sys` 必须部署在独立主机并配合严格的操作系统权限控制。
 - 请将 console HTTP（`:8089`）和 gRPC（`:50051`）端点放在反向代理/网关之后，并对外访问强制 TLS。
 - 生产环境应将 gRPC 端口保持内网并通过隧道/链路加密。
 - Token 明文与 `WORKER_SECRET` 仅在创建时返回一次。

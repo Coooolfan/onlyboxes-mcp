@@ -10,15 +10,18 @@ import WorkerCreateResultModal from '@/components/dashboard/WorkerCreateResultMo
 import WorkersTable from '@/components/dashboard/WorkersTable.vue'
 import WorkersToolbar from '@/components/dashboard/WorkersToolbar.vue'
 import { useDismissibleMenu } from '@/composables/useDismissibleMenu'
+import { useAuthStore } from '@/stores/auth'
 import { useWorkersStore } from '@/stores/workers'
-import type { WorkerStartupCommandResponse, WorkerStatus } from '@/types/workers'
+import type { WorkerStartupCommandResponse, WorkerStatus, WorkerType } from '@/types/workers'
 
 const workersStore = useWorkersStore()
+const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const createdWorkerPayload = ref<WorkerStartupCommandResponse | null>(null)
 const refreshControlRef = ref<HTMLElement | null>(null)
 const showRefreshControlMenu = ref(false)
+const selectedWorkerType = ref<WorkerType>('normal')
 
 function parseStatus(raw: unknown): WorkerStatus {
   return raw === 'online' || raw === 'offline' || raw === 'all' ? raw : 'all'
@@ -123,7 +126,8 @@ useDismissibleMenu({
 })
 
 async function handleAddWorker(): Promise<void> {
-  const payload = await workersStore.createWorker()
+  const workerType: WorkerType = authStore.isAdmin ? selectedWorkerType.value : 'worker-sys'
+  const payload = await workersStore.createWorker(workerType)
   if (!payload) {
     return
   }
@@ -133,6 +137,16 @@ async function handleAddWorker(): Promise<void> {
 function closeWorkerCreateResultModal(): void {
   createdWorkerPayload.value = null
 }
+
+const createButtonText = computed(() => {
+  if (workersStore.creatingWorker) {
+    return authStore.isAdmin ? 'Adding...' : 'Creating...'
+  }
+  if (!authStore.isAdmin) {
+    return 'Create Worker-Sys'
+  }
+  return selectedWorkerType.value === 'normal' ? 'Add Normal Worker' : 'Add Worker-Sys'
+})
 
 watch(
   () => route.query,
@@ -175,13 +189,29 @@ onBeforeUnmount(() => {
         Real-time monitoring for worker registration and heartbeat health.
       </template>
       <template #actions>
+        <label
+          v-if="authStore.isAdmin"
+          class="inline-flex items-center gap-2 rounded-md border border-stroke bg-surface px-2.5 py-1.5 text-sm text-secondary"
+        >
+          <span>Type</span>
+          <select
+            v-model="selectedWorkerType"
+            data-testid="create-worker-type-select"
+            class="rounded border border-stroke bg-surface px-2 py-1 text-sm text-primary outline-none focus:border-stroke-hover"
+            :disabled="workersStore.creatingWorker"
+          >
+            <option value="normal">normal</option>
+            <option value="worker-sys">worker-sys</option>
+          </select>
+        </label>
         <button
+          data-testid="create-worker-button"
           class="rounded-md px-3.5 py-2 text-sm font-medium h-9 inline-flex items-center justify-center text-white bg-accent border border-accent transition-all duration-200 hover:not-disabled:bg-[#333] hover:not-disabled:border-[#333] disabled:cursor-not-allowed disabled:opacity-50"
           type="button"
           :disabled="workersStore.creatingWorker"
           @click="handleAddWorker"
         >
-          {{ workersStore.creatingWorker ? 'Adding...' : 'Add Worker' }}
+          {{ createButtonText }}
         </button>
         <div ref="refreshControlRef" class="relative">
           <button

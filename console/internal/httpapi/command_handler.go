@@ -19,7 +19,11 @@ const (
 	defaultTerminalTimeoutMS        = defaultTaskTimeoutMS
 	minTerminalTimeoutMS            = 1
 	maxTerminalTimeoutMS            = maxTaskTimeoutMS
+	defaultComputerUseTimeoutMS     = defaultTaskTimeoutMS
+	minComputerUseTimeoutMS         = 1
+	maxComputerUseTimeoutMS         = maxTaskTimeoutMS
 	terminalExecCapability          = "terminalExec"
+	computerUseCapability           = "computerUse"
 	terminalExecSessionNotFoundCode = "session_not_found"
 	terminalExecSessionBusyCode     = "session_busy"
 	terminalExecInvalidPayloadCode  = "invalid_payload"
@@ -68,6 +72,16 @@ type terminalExecPayload struct {
 	LeaseTTLSec     *int   `json:"lease_ttl_sec,omitempty"`
 }
 
+type computerUseCommandRequest struct {
+	Command   string `json:"command"`
+	TimeoutMS *int   `json:"timeout_ms,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+}
+
+type computerUsePayload struct {
+	Command string `json:"command"`
+}
+
 type terminalCommandResponse struct {
 	SessionID          string `json:"session_id"`
 	Created            bool   `json:"created"`
@@ -77,6 +91,14 @@ type terminalCommandResponse struct {
 	StdoutTruncated    bool   `json:"stdout_truncated"`
 	StderrTruncated    bool   `json:"stderr_truncated"`
 	LeaseExpiresUnixMS int64  `json:"lease_expires_unix_ms"`
+}
+
+type computerUseCommandResponse struct {
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	ExitCode        int    `json:"exit_code"`
+	StdoutTruncated bool   `json:"stdout_truncated"`
+	StderrTruncated bool   `json:"stderr_truncated"`
 }
 
 func (h *WorkerHandler) EchoCommand(c *gin.Context) {
@@ -210,6 +232,79 @@ func (h *WorkerHandler) TerminalCommand(c *gin.Context) {
 	}
 }
 
+func (h *WorkerHandler) ComputerUseCommand(c *gin.Context) {
+	if h.dispatcher == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "task dispatcher is unavailable"})
+		return
+	}
+	ownerID, ok := requireRequestOwnerID(c)
+	if !ok {
+		return
+	}
+
+	var req computerUseCommandRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	if strings.TrimSpace(req.Command) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "command is required"})
+		return
+	}
+
+	timeoutMS := defaultComputerUseTimeoutMS
+	if req.TimeoutMS != nil {
+		timeoutMS = *req.TimeoutMS
+	}
+	if timeoutMS < minComputerUseTimeoutMS || timeoutMS > maxComputerUseTimeoutMS {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "timeout_ms must be between 1 and 600000"})
+		return
+	}
+
+	payloadJSON, err := json.Marshal(computerUsePayload{Command: req.Command})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode computerUse payload"})
+		return
+	}
+
+	taskResult, err := h.dispatcher.SubmitTask(c.Request.Context(), grpcserver.SubmitTaskRequest{
+		Capability: computerUseCapability,
+		InputJSON:  payloadJSON,
+		Mode:       grpcserver.TaskModeSync,
+		Timeout:    time.Duration(timeoutMS) * time.Millisecond,
+		RequestID:  strings.TrimSpace(req.RequestID),
+		OwnerID:    ownerID,
+	})
+	if err != nil {
+		h.writeTaskSubmitError(c, err)
+		return
+	}
+	if !taskResult.Completed {
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "task timed out"})
+		return
+	}
+
+	task := taskResult.Task
+	switch task.Status {
+	case grpcserver.TaskStatusSucceeded:
+		response := computerUseCommandResponse{}
+		if err := json.Unmarshal(task.ResultJSON, &response); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "invalid computerUse result payload"})
+			return
+		}
+		c.JSON(http.StatusOK, response)
+	case grpcserver.TaskStatusTimeout:
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "task timed out"})
+	case grpcserver.TaskStatusCanceled:
+		c.JSON(http.StatusConflict, gin.H{"error": "task canceled"})
+	case grpcserver.TaskStatusFailed:
+		statusCode, message := mapComputerUseTaskFailure(task)
+		c.JSON(statusCode, gin.H{"error": message})
+	default:
+		c.JSON(http.StatusBadGateway, gin.H{"error": "unexpected task status"})
+	}
+}
+
 func mapTerminalTaskFailure(task grpcserver.TaskSnapshot) (int, string) {
 	code := strings.TrimSpace(task.ErrorCode)
 	message := strings.TrimSpace(task.ErrorMessage)
@@ -226,6 +321,29 @@ func mapTerminalTaskFailure(task grpcserver.TaskSnapshot) (int, string) {
 		return http.StatusServiceUnavailable, "no online worker supports requested capability"
 	case terminalTaskNoCapacityCode:
 		return http.StatusTooManyRequests, "no online worker capacity for requested capability"
+	case terminalExecInvalidPayloadCode:
+		return http.StatusBadRequest, message
+	case terminalTaskTimeoutCode, "deadline_exceeded":
+		return http.StatusGatewayTimeout, message
+	default:
+		return http.StatusBadGateway, message
+	}
+}
+
+func mapComputerUseTaskFailure(task grpcserver.TaskSnapshot) (int, string) {
+	code := strings.TrimSpace(task.ErrorCode)
+	message := strings.TrimSpace(task.ErrorMessage)
+	if message == "" {
+		message = "computerUse command failed"
+	}
+
+	switch code {
+	case terminalTaskNoWorkerCode:
+		return http.StatusServiceUnavailable, "no online worker supports requested capability"
+	case terminalTaskNoCapacityCode:
+		return http.StatusTooManyRequests, "no online worker capacity for requested capability"
+	case terminalExecSessionBusyCode:
+		return http.StatusConflict, message
 	case terminalExecInvalidPayloadCode:
 		return http.StatusBadRequest, message
 	case terminalTaskTimeoutCode, "deadline_exceeded":

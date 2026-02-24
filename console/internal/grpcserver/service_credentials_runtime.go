@@ -13,6 +13,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+var ErrInvalidWorkerType = errors.New("invalid worker type")
+var ErrWorkerSysAlreadyExists = errors.New("worker-sys already exists for owner")
+
+const defaultWorkerOwnerID = "system"
+
 func (s *RegistryService) SetHasher(hasher *persistence.Hasher) {
 	if s == nil {
 		return
@@ -36,6 +41,29 @@ func (s *RegistryService) GetWorkerSecret(nodeID string) (string, bool) {
 }
 
 func (s *RegistryService) CreateProvisionedWorker(now time.Time, offlineTTL time.Duration) (string, string, error) {
+	return s.CreateProvisionedWorkerForOwner(defaultWorkerOwnerID, registry.WorkerTypeNormal, now, offlineTTL)
+}
+
+func (s *RegistryService) CreateProvisionedWorkerForOwner(
+	ownerID string,
+	workerType string,
+	now time.Time,
+	offlineTTL time.Duration,
+) (string, string, error) {
+	normalizedOwnerID := strings.TrimSpace(ownerID)
+	if normalizedOwnerID == "" {
+		return "", "", errors.New("owner_id is required")
+	}
+	normalizedWorkerType := normalizeProvisioningWorkerType(workerType)
+	if normalizedWorkerType == "" {
+		return "", "", ErrInvalidWorkerType
+	}
+	if normalizedWorkerType == registry.WorkerTypeSys {
+		if count := s.store.CountWorkersByOwnerAndType(normalizedOwnerID, normalizedWorkerType); count > 0 {
+			return "", "", ErrWorkerSysAlreadyExists
+		}
+	}
+
 	for attempt := 0; attempt < maxProvisioningCreateAttempts; attempt++ {
 		workerID, err := generateUUIDv4()
 		if err != nil {
@@ -50,12 +78,25 @@ func (s *RegistryService) CreateProvisionedWorker(now time.Time, offlineTTL time
 			{
 				NodeID: workerID,
 				Labels: map[string]string{
-					"source": "console-ui",
+					"source":                     "console-ui",
+					registry.LabelOwnerIDKey:    normalizedOwnerID,
+					registry.LabelWorkerTypeKey: normalizedWorkerType,
 				},
 			},
 		}, now, offlineTTL)
 		if seeded != 1 {
 			continue
+		}
+		if normalizedWorkerType == registry.WorkerTypeSys {
+			claimed, claimErr := s.store.ClaimWorkerSysOwner(normalizedOwnerID, workerID, now)
+			if claimErr != nil {
+				s.store.Delete(workerID)
+				return "", "", fmt.Errorf("claim worker-sys owner: %w", claimErr)
+			}
+			if !claimed {
+				s.store.Delete(workerID)
+				return "", "", ErrWorkerSysAlreadyExists
+			}
 		}
 
 		credentialValue := workerSecret
@@ -83,6 +124,17 @@ func (s *RegistryService) CreateProvisionedWorker(now time.Time, offlineTTL time
 		return workerID, workerSecret, nil
 	}
 	return "", "", errors.New("failed to allocate unique worker_id")
+}
+
+func normalizeProvisioningWorkerType(workerType string) string {
+	switch strings.TrimSpace(strings.ToLower(workerType)) {
+	case registry.WorkerTypeNormal:
+		return registry.WorkerTypeNormal
+	case registry.WorkerTypeSys:
+		return registry.WorkerTypeSys
+	default:
+		return ""
+	}
 }
 
 func (s *RegistryService) DeleteProvisionedWorker(nodeID string) bool {

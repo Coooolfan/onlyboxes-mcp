@@ -5,6 +5,7 @@ sql:
       - "db/migrations/00001_init.sql"
       - "db/migrations/00002_dashboard_credentials.sql"
       - "db/migrations/00003_accounts_and_token_binding.sql"
+      - "db/migrations/00004_worker_sys_owner_claims.sql"
     queries:
       - "db/queries/accounts.sql"
       - "db/queries/workers.sql"

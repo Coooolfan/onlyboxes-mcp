@@ -177,6 +177,59 @@ func TestStoreSeedProvisionedWorkersCountsAsOffline(t *testing.T) {
 	}
 }
 
+func TestStoreClaimWorkerSysOwner(t *testing.T) {
+	store := newTestStore(t)
+	now := time.Unix(1_700_003_500, 0)
+
+	seeded := store.SeedProvisionedWorkers([]ProvisionedWorker{
+		{
+			NodeID: "node-sys-1",
+			Labels: map[string]string{
+				LabelOwnerIDKey:    "owner-a",
+				LabelWorkerTypeKey: WorkerTypeSys,
+			},
+		},
+		{
+			NodeID: "node-sys-2",
+			Labels: map[string]string{
+				LabelOwnerIDKey:    "owner-a",
+				LabelWorkerTypeKey: WorkerTypeSys,
+			},
+		},
+	}, now, 15*time.Second)
+	if seeded != 2 {
+		t.Fatalf("expected seeded=2, got %d", seeded)
+	}
+
+	firstClaimed, err := store.ClaimWorkerSysOwner("owner-a", "node-sys-1", now)
+	if err != nil {
+		t.Fatalf("claim first worker-sys failed: %v", err)
+	}
+	if !firstClaimed {
+		t.Fatalf("expected first claim to succeed")
+	}
+
+	secondClaimed, err := store.ClaimWorkerSysOwner("owner-a", "node-sys-2", now)
+	if err != nil {
+		t.Fatalf("claim second worker-sys failed: %v", err)
+	}
+	if secondClaimed {
+		t.Fatalf("expected second claim to be rejected")
+	}
+
+	if removed := store.Delete("node-sys-1"); !removed {
+		t.Fatalf("expected to delete first claimed node")
+	}
+
+	reclaimed, err := store.ClaimWorkerSysOwner("owner-a", "node-sys-2", now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("claim second worker-sys after delete failed: %v", err)
+	}
+	if !reclaimed {
+		t.Fatalf("expected claim to succeed after claimed node deletion")
+	}
+}
+
 func TestStorePruneOfflineKeepsProvisionedWorkers(t *testing.T) {
 	store := newTestStore(t)
 	now := time.Unix(1_700_004_000, 0)

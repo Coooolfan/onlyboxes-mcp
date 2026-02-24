@@ -19,6 +19,7 @@ import type {
   WorkerStartupCommandResponse,
   WorkerStatsResponse,
   WorkerStatus,
+  WorkerType,
 } from '@/types/workers'
 
 const pageSize = 25
@@ -242,7 +243,7 @@ export const useWorkersStore = defineStore('workers', () => {
     return entries.map(([key, value]) => `${key}=${value}`).join(' · ')
   }
 
-  async function createWorker(): Promise<WorkerStartupCommandResponse | null> {
+  async function createWorker(workerType: WorkerType): Promise<WorkerStartupCommandResponse | null> {
     if (creatingWorker.value) {
       return null
     }
@@ -251,7 +252,7 @@ export const useWorkersStore = defineStore('workers', () => {
     creatingWorker.value = true
 
     try {
-      const payload: WorkerStartupCommandResponse = await createWorkerAPI()
+      const payload: WorkerStartupCommandResponse = await createWorkerAPI(workerType)
       await loadDashboard()
       return payload
     } catch (error) {

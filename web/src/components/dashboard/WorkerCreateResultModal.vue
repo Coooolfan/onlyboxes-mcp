@@ -183,6 +183,16 @@ onBeforeUnmount(() => {
             <p class="m-0 flex items-start gap-3 max-[700px]:flex-wrap max-[700px]:gap-1">
               <span
                 class="shrink-0 w-[120px] text-secondary text-[13px] font-medium max-[700px]:w-full"
+                >Worker Type</span
+              >
+              <code
+                class="flex-1 min-w-0 font-mono text-[13px] bg-surface-soft border border-stroke rounded-default px-2 py-1 break-all whitespace-pre-wrap"
+                >{{ payload.type }}</code
+              >
+            </p>
+            <p class="m-0 flex items-start gap-3 max-[700px]:flex-wrap max-[700px]:gap-1">
+              <span
+                class="shrink-0 w-[120px] text-secondary text-[13px] font-medium max-[700px]:w-full"
                 >Worker Secret</span
               >
               <code

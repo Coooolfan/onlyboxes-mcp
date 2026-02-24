@@ -182,7 +182,7 @@ func (s *RegistryService) SubmitTask(ctx context.Context, req SubmitTaskRequest)
 		}
 	}
 
-	if availabilityErr := s.checkCapabilityAvailability(capability); availabilityErr != nil {
+	if availabilityErr := s.checkCapabilityAvailability(capability, ownerID); availabilityErr != nil {
 		return SubmitTaskResult{}, availabilityErr
 	}
 
@@ -366,7 +366,7 @@ func (s *RegistryService) executeTask(ctx context.Context, taskID string, ownerI
 		return
 	}
 	var markRunningErr error
-	outcome, err := s.dispatchCommand(ctx, capability, inputJSON, 0, func(commandID string) {
+	outcome, err := s.dispatchCommand(ctx, capability, inputJSON, 0, ownerID, func(commandID string) {
 		if markErr := s.markTaskRunning(taskID, commandID); markErr != nil {
 			markRunningErr = markErr
 			runtime := s.getTaskRuntime(taskID)
@@ -589,9 +589,8 @@ func (s *RegistryService) closeTaskRuntimeRecord(record *taskRecord) {
 	})
 }
 
-func (s *RegistryService) checkCapabilityAvailability(capability string) error {
-	now := s.nowFn()
-	nodeIDs := s.store.ListOnlineNodeIDsByCapability(capability, now, time.Duration(s.offlineTTLSec)*time.Second)
+func (s *RegistryService) checkCapabilityAvailability(capability string, ownerID string) error {
+	nodeIDs := s.listOnlineNodeIDsForCapability(capability, ownerID)
 	if len(nodeIDs) == 0 {
 		return ErrNoCapabilityWorker
 	}

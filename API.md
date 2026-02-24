@@ -26,7 +26,7 @@ Onlyboxes has two auth paths:
   - `/api/v1/console/register`
   - `/api/v1/console/accounts*`
   - `/api/v1/console/tokens*`
-  - `/api/v1/workers*` (admin routes)
+  - `/api/v1/workers*` (role-scoped worker routes)
 - Session TTL is 12 hours in-memory; console restart invalidates all sessions.
 
 ### 1.2 Access Token (Bearer)
@@ -298,7 +298,23 @@ Always returns `410 Gone`:
 }
 ```
 
-## 5. Worker Management APIs (Admin Dashboard Auth)
+## 5. Worker Management APIs (Dashboard Auth, Role-Scoped)
+
+Worker types:
+
+- `normal` (maps to `worker-docker`)
+- `worker-sys` (maps to `worker-sys`)
+
+Permission matrix:
+
+- admin:
+  - list/stats/inflight: all workers
+  - delete: any worker
+  - create: `normal` and `worker-sys`
+- non-admin:
+  - list/stats/inflight: only own `worker-sys`
+  - delete: only own `worker-sys` (other targets return `404`)
+  - create: only `worker-sys`, max one per account
 
 ### 5.1 List Workers
 
@@ -322,7 +338,11 @@ Success `200`:
       "capabilities": [
         { "name": "echo", "max_inflight": 4 }
       ],
-      "labels": { "region": "us" },
+      "labels": {
+        "region": "us",
+        "obx.owner_id": "acc_xxx",
+        "obx.worker_type": "normal"
+      },
       "version": "v0.1.0",
       "status": "online",
       "registered_at": "2026-02-21T00:00:00Z",
@@ -360,6 +380,8 @@ Success `200`:
 }
 ```
 
+Note: non-admin responses are scoped to the caller-owned `worker-sys`.
+
 ### 5.3 Worker Inflight Stats
 
 `GET /api/v1/workers/inflight`
@@ -380,17 +402,32 @@ Success `200`:
 }
 ```
 
+Note: non-admin responses are scoped to the caller-owned `worker-sys`.
+
 ### 5.4 Create Worker Credential
 
 `POST /api/v1/workers`
 
-Request body: none.
+Request body:
+
+```json
+{
+  "type": "normal"
+}
+```
+
+Rules:
+
+- `type` is required, value must be `normal|worker-sys`.
+- only admin can create `normal`.
+- every account can create at most one `worker-sys`.
 
 Success `201`:
 
 ```json
 {
   "node_id": "2f51f8f9-77f2-4c1a-a4f5-2036fc9fcb9e",
+  "type": "normal",
   "command": "WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 WORKER_ID=... WORKER_SECRET=... WORKER_HEARTBEAT_INTERVAL_SEC=5 WORKER_HEARTBEAT_JITTER_PCT=20 ./path-to-binary"
 }
 ```
@@ -402,6 +439,9 @@ Notes:
 
 Errors:
 
+- `400` invalid request body / invalid `type`
+- `403` non-admin creating `normal`
+- `409` caller already owns a `worker-sys`
 - `503` provisioning unavailable
 - `500` create failure
 
@@ -412,7 +452,7 @@ Errors:
 Responses:
 
 - `204` deleted
-- `404` worker not found
+- `404` worker not found (also returned for unauthorized non-admin targets)
 - `400` missing `node_id`
 - `503` provisioning unavailable
 
@@ -507,6 +547,50 @@ Errors:
 - `409` `session_busy` or canceled
 - `429` no worker capacity
 - `503` no compatible worker
+- `504` timeout
+- `502` unexpected execution failure
+
+### 6.3 Computer Use Command
+
+`POST /api/v1/commands/computer-use`
+
+Request:
+
+```json
+{
+  "command": "pwd",
+  "timeout_ms": 60000,
+  "request_id": "optional-idempotency-key"
+}
+```
+
+Rules:
+
+- `command`: required, non-empty
+- `timeout_ms`: optional, range `1..600000`, default `60000`
+- `request_id`: optional, idempotency key scoped per account
+- `lease_ttl_sec` is ignored if provided by legacy clients
+- routing is account-scoped: requests are dispatched only to caller-owned `worker-sys`
+- account-scoped concurrency is single-flight (`max_inflight=1`)
+
+Success `200`:
+
+```json
+{
+  "stdout": "...",
+  "stderr": "...",
+  "exit_code": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false
+}
+```
+
+Errors:
+
+- `400` invalid body/params or `invalid_payload`
+- `409` worker `session_busy` or task canceled
+- `429` no worker capacity (`no_capacity`)
+- `503` no caller-owned online `worker-sys` (`no_worker`)
 - `504` timeout
 - `502` unexpected execution failure
 
@@ -719,6 +803,36 @@ Output:
 }
 ```
 
+#### Tool: `computerUse`
+
+Input:
+
+```json
+{
+  "command": "pwd",
+  "timeout_ms": 60000,
+  "request_id": "optional-idempotency-key"
+}
+```
+
+- `command` required
+- `timeout_ms` optional, `1..600000`, default `60000`
+- `request_id` optional, idempotency key scoped per account
+- routed only to caller-owned `worker-sys`
+- no terminal session fields (`session_id`, `create_if_missing`, `created`)
+
+Output:
+
+```json
+{
+  "stdout": "...",
+  "stderr": "...",
+  "exit_code": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false
+}
+```
+
 #### Tool: `readImage`
 
 Input:
@@ -785,6 +899,8 @@ Console responds with:
 
 - Console gRPC has no built-in TLS/mTLS in this release.
 - `worker-docker` rejects insecure console endpoints by default, and allows plaintext only when `WORKER_CONSOLE_INSECURE=true`.
+- `worker-sys` executes `computerUse` directly on host shell (`/bin/sh -lc`) without container isolation.
+- deploy `worker-sys` only on dedicated hosts with strict OS-level access controls.
 - Put console HTTP (`:8089`) and gRPC (`:50051`) behind a reverse proxy/gateway and enforce TLS for external access.
 - Keep gRPC endpoint private and tunnel/encrypt traffic in production.
 - Token plaintext and `WORKER_SECRET` are one-time return values.

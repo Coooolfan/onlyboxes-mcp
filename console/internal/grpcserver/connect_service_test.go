@@ -13,6 +13,7 @@ import (
 	"time"
 
 	registryv1 "github.com/onlyboxes/onlyboxes/api/gen/go/registry/v1"
+	"github.com/onlyboxes/onlyboxes/console/internal/registry"
 	"github.com/onlyboxes/onlyboxes/console/internal/testutil/registrytest"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -131,6 +132,71 @@ func TestCreateProvisionedWorkerAllowsDynamicConnect(t *testing.T) {
 	_ = stream.CloseSend()
 }
 
+func TestCreateProvisionedWorkerForOwnerLimitsWorkerSysToOne(t *testing.T) {
+	store := registrytest.NewStore(t)
+	svc := NewRegistryService(store, map[string]string{}, 5, 15, 60*time.Second)
+	now := time.Now()
+
+	firstID, firstSecret, err := svc.CreateProvisionedWorkerForOwner("owner-a", registry.WorkerTypeSys, now, 15*time.Second)
+	if err != nil {
+		t.Fatalf("create first worker-sys failed: %v", err)
+	}
+	if strings.TrimSpace(firstID) == "" || strings.TrimSpace(firstSecret) == "" {
+		t.Fatalf("expected non-empty first worker-sys credentials")
+	}
+
+	_, _, err = svc.CreateProvisionedWorkerForOwner("owner-a", registry.WorkerTypeSys, now, 15*time.Second)
+	if !errors.Is(err, ErrWorkerSysAlreadyExists) {
+		t.Fatalf("expected ErrWorkerSysAlreadyExists, got %v", err)
+	}
+}
+
+func TestCreateProvisionedWorkerForOwnerWorkerSysConcurrentSingleton(t *testing.T) {
+	store := registrytest.NewStore(t)
+	svc := NewRegistryService(store, map[string]string{}, 5, 15, 60*time.Second)
+	now := time.Now()
+
+	const concurrentCreates = 16
+	var wg sync.WaitGroup
+	var successCount atomic.Int32
+	errCh := make(chan error, concurrentCreates)
+
+	start := make(chan struct{})
+	for i := 0; i < concurrentCreates; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			workerID, workerSecret, err := svc.CreateProvisionedWorkerForOwner("owner-a", registry.WorkerTypeSys, now, 15*time.Second)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if strings.TrimSpace(workerID) == "" || strings.TrimSpace(workerSecret) == "" {
+				errCh <- errors.New("expected non-empty worker-sys credentials")
+				return
+			}
+			successCount.Add(1)
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if !errors.Is(err, ErrWorkerSysAlreadyExists) {
+			t.Fatalf("expected ErrWorkerSysAlreadyExists for non-winning calls, got %v", err)
+		}
+	}
+	if successCount.Load() != 1 {
+		t.Fatalf("expected exactly one successful worker-sys creation, got %d", successCount.Load())
+	}
+	if count := store.CountWorkersByOwnerAndType("owner-a", registry.WorkerTypeSys); count != 1 {
+		t.Fatalf("expected one worker-sys in store, got %d", count)
+	}
+}
+
 func TestDeleteProvisionedWorkerDisconnectsSessionAndRevokesCredential(t *testing.T) {
 	store := registrytest.NewStore(t)
 	svc := NewRegistryService(store, map[string]string{}, 5, 15, 60*time.Second)
@@ -216,6 +282,71 @@ func TestConnectAcceptsHelloWithoutLegacyAuthFields(t *testing.T) {
 		t.Fatalf("expected non-empty session_id")
 	}
 	_ = stream.CloseSend()
+}
+
+func TestConnectRejectsWorkerSysNonComputerUseCapability(t *testing.T) {
+	store := registrytest.NewStore(t)
+	now := time.Unix(1_700_000_010, 0)
+	seeded := store.SeedProvisionedWorkers([]registry.ProvisionedWorker{
+		{
+			NodeID: "node-sys",
+			Labels: map[string]string{
+				registry.LabelOwnerIDKey:    "owner-a",
+				registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+			},
+		},
+	}, now, 15*time.Second)
+	if seeded != 1 {
+		t.Fatalf("expected one seeded worker, got %d", seeded)
+	}
+
+	svc := NewRegistryService(store, map[string]string{"node-sys": "secret-sys"}, 5, 15, 60*time.Second)
+	client, cleanup := newBufClient(t, svc)
+	defer cleanup()
+
+	_, _, err := connectWorker(client, "node-sys", "secret-sys", "nonce-sys-invalid-capability", []string{"echo"})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expected PermissionDenied, got %v", err)
+	}
+}
+
+func TestConnectWorkerSysForcesComputerUseMaxInflightOne(t *testing.T) {
+	store := registrytest.NewStore(t)
+	now := time.Unix(1_700_000_020, 0)
+	seeded := store.SeedProvisionedWorkers([]registry.ProvisionedWorker{
+		{
+			NodeID: "node-sys",
+			Labels: map[string]string{
+				registry.LabelOwnerIDKey:    "owner-a",
+				registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+			},
+		},
+	}, now, 15*time.Second)
+	if seeded != 1 {
+		t.Fatalf("expected one seeded worker, got %d", seeded)
+	}
+
+	svc := NewRegistryService(store, map[string]string{"node-sys": "secret-sys"}, 5, 15, 60*time.Second)
+	client, cleanup := newBufClient(t, svc)
+	defer cleanup()
+
+	stream, _, err := connectWorker(client, "node-sys", "secret-sys", "nonce-sys-computer-use", []string{computerUseCapabilityDeclared})
+	if err != nil {
+		t.Fatalf("connect worker failed: %v", err)
+	}
+	defer stream.CloseSend()
+
+	session := svc.getSession("node-sys")
+	if session == nil {
+		t.Fatalf("expected active session for node-sys")
+	}
+	_, maxInflight, ok := session.inflightSnapshot(computerUseCapabilityName)
+	if !ok {
+		t.Fatalf("expected computerUse capability to be present")
+	}
+	if maxInflight != 1 {
+		t.Fatalf("expected max_inflight to be forced to 1, got %d", maxInflight)
+	}
 }
 
 func TestConnectAndHeartbeatSuccess(t *testing.T) {
@@ -411,6 +542,94 @@ func TestDispatchEchoSuccess(t *testing.T) {
 	}
 	if got != "hello" {
 		t.Fatalf("expected hello, got %q", got)
+	}
+}
+
+func TestSubmitTaskComputerUseRoutesByOwnerAndCapacity(t *testing.T) {
+	store := registrytest.NewStore(t)
+	now := time.Unix(1_700_000_050, 0)
+	seeded := store.SeedProvisionedWorkers([]registry.ProvisionedWorker{
+		{
+			NodeID: "node-owner-a",
+			Labels: map[string]string{
+				registry.LabelOwnerIDKey:    "owner-a",
+				registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+			},
+		},
+		{
+			NodeID: "node-owner-b",
+			Labels: map[string]string{
+				registry.LabelOwnerIDKey:    "owner-b",
+				registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+			},
+		},
+	}, now, 15*time.Second)
+	if seeded != 2 {
+		t.Fatalf("expected two seeded workers, got %d", seeded)
+	}
+
+	svc := NewRegistryService(
+		store,
+		map[string]string{
+			"node-owner-a": "secret-owner-a",
+			"node-owner-b": "secret-owner-b",
+		},
+		5,
+		15,
+		60*time.Second,
+	)
+	client, cleanup := newBufClient(t, svc)
+	defer cleanup()
+
+	streamA, _, err := connectWorker(client, "node-owner-a", "secret-owner-a", "nonce-owner-a", []string{computerUseCapabilityDeclared})
+	if err != nil {
+		t.Fatalf("connect worker owner-a failed: %v", err)
+	}
+	defer streamA.CloseSend()
+	streamB, _, err := connectWorker(client, "node-owner-b", "secret-owner-b", "nonce-owner-b", []string{computerUseCapabilityDeclared})
+	if err != nil {
+		t.Fatalf("connect worker owner-b failed: %v", err)
+	}
+	defer streamB.CloseSend()
+
+	go computerUseResponder(streamA, "owner-a")
+	go computerUseResponder(streamB, "owner-b")
+
+	resultB, err := svc.SubmitTask(context.Background(), SubmitTaskRequest{
+		Capability: "computerUse",
+		InputJSON:  []byte(`{"command":"echo owner-b"}`),
+		Mode:       TaskModeSync,
+		Timeout:    2 * time.Second,
+		OwnerID:    "owner-b",
+	})
+	if err != nil {
+		t.Fatalf("submit owner-b task failed: %v", err)
+	}
+	if !resultB.Completed || resultB.Task.Status != TaskStatusSucceeded {
+		t.Fatalf("expected owner-b task succeeded, got completed=%v status=%s", resultB.Completed, resultB.Task.Status)
+	}
+	if !strings.Contains(string(resultB.Task.ResultJSON), "owner-b") {
+		t.Fatalf("expected owner-b worker result, got %s", string(resultB.Task.ResultJSON))
+	}
+
+	sessionA := svc.getSession("node-owner-a")
+	if sessionA == nil {
+		t.Fatalf("expected active session for owner-a worker")
+	}
+	if !sessionA.tryAcquireCapability(computerUseCapabilityName) {
+		t.Fatalf("expected to acquire owner-a computerUse slot")
+	}
+	defer sessionA.releaseCapability(computerUseCapabilityName)
+
+	_, err = svc.SubmitTask(context.Background(), SubmitTaskRequest{
+		Capability: "computerUse",
+		InputJSON:  []byte(`{"command":"echo owner-a"}`),
+		Mode:       TaskModeSync,
+		Timeout:    500 * time.Millisecond,
+		OwnerID:    "owner-a",
+	})
+	if !errors.Is(err, ErrNoWorkerCapacity) {
+		t.Fatalf("expected ErrNoWorkerCapacity for owner-a, got %v", err)
 	}
 }
 
@@ -711,7 +930,7 @@ func TestDispatchCommandTerminalRouteRollbackWhenEnqueueFails(t *testing.T) {
 		t.Fatalf("marshal payload failed: %v", err)
 	}
 
-	_, dispatchErr := svc.dispatchCommand(context.Background(), taskCapabilityTerminalExec, payloadJSON, 30*time.Millisecond, nil)
+	_, dispatchErr := svc.dispatchCommand(context.Background(), taskCapabilityTerminalExec, payloadJSON, 30*time.Millisecond, "owner-a", nil)
 	if !errors.Is(dispatchErr, context.DeadlineExceeded) {
 		t.Fatalf("expected context.DeadlineExceeded, got %v", dispatchErr)
 	}
@@ -762,7 +981,7 @@ func TestDispatchCommandTerminalSessionNotFoundClearsRoute(t *testing.T) {
 		t.Fatalf("marshal payload failed: %v", err)
 	}
 
-	outcome, dispatchErr := svc.dispatchCommand(context.Background(), taskCapabilityTerminalExec, payloadJSON, 2*time.Second, nil)
+	outcome, dispatchErr := svc.dispatchCommand(context.Background(), taskCapabilityTerminalExec, payloadJSON, 2*time.Second, "owner-a", nil)
 	if dispatchErr != nil {
 		t.Fatalf("dispatch command failed: %v", dispatchErr)
 	}
@@ -1337,7 +1556,7 @@ func TestDispatchCommandContextCanceledAfterEnqueueCleansPending(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, dispatchErr := svc.dispatchCommand(ctx, "echo", buildEchoPayload("cleanup"), 2*time.Second, nil)
+		_, dispatchErr := svc.dispatchCommand(ctx, "echo", buildEchoPayload("cleanup"), 2*time.Second, "", nil)
 		errCh <- dispatchErr
 	}()
 
@@ -1560,6 +1779,39 @@ func terminalExecResponder(stream grpc.BidiStreamingClient[registryv1.ConnectReq
 				CommandResult: &registryv1.CommandResult{
 					CommandId:       dispatch.GetCommandId(),
 					PayloadJson:     resultPayload,
+					CompletedUnixMs: time.Now().UnixMilli(),
+				},
+			},
+		})
+	}
+}
+
+func computerUseResponder(stream grpc.BidiStreamingClient[registryv1.ConnectRequest, registryv1.ConnectResponse], marker string) {
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			return
+		}
+		dispatch := resp.GetCommandDispatch()
+		if dispatch == nil {
+			continue
+		}
+		if normalizeCapability(dispatch.GetCapability()) != computerUseCapabilityName {
+			continue
+		}
+		payloadJSON, _ := json.Marshal(map[string]any{
+			"stdout":                marker,
+			"stderr":                "",
+			"exit_code":             0,
+			"stdout_truncated":      false,
+			"stderr_truncated":      false,
+			"lease_expires_unix_ms": time.Now().Add(time.Minute).UnixMilli(),
+		})
+		_ = stream.Send(&registryv1.ConnectRequest{
+			Payload: &registryv1.ConnectRequest_CommandResult{
+				CommandResult: &registryv1.CommandResult{
+					CommandId:       dispatch.GetCommandId(),
+					PayloadJson:     payloadJSON,
 					CompletedUnixMs: time.Now().UnixMilli(),
 				},
 			},

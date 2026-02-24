@@ -1,4 +1,5 @@
 export type WorkerStatus = 'all' | 'online' | 'offline'
+export type WorkerType = 'normal' | 'worker-sys'
 
 export interface CapabilityDeclaration {
   name: string
@@ -50,6 +51,7 @@ export interface WorkerInflightResponse {
 
 export interface WorkerStartupCommandResponse {
   node_id: string
+  type: WorkerType
   command: string
 }
 

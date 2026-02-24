@@ -78,8 +78,8 @@ func TestMCPToolsList(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected tools array, got %#v", result["tools"])
 	}
-	if len(toolsRaw) != 4 {
-		t.Fatalf("expected exactly 4 tools, got %d", len(toolsRaw))
+	if len(toolsRaw) != 5 {
+		t.Fatalf("expected exactly 5 tools, got %d", len(toolsRaw))
 	}
 
 	toolByName := map[string]map[string]any{}
@@ -98,6 +98,9 @@ func TestMCPToolsList(t *testing.T) {
 	}
 	if _, ok := toolByName["terminalExec"]; !ok {
 		t.Fatalf("expected tool terminalExec in tools/list")
+	}
+	if _, ok := toolByName["computerUse"]; !ok {
+		t.Fatalf("expected tool computerUse in tools/list")
 	}
 	if _, ok := toolByName["readImage"]; !ok {
 		t.Fatalf("expected tool readImage in tools/list")
@@ -259,6 +262,29 @@ func TestMCPToolsList(t *testing.T) {
 		t.Fatalf("expected terminalExec.lease_expires_unix_ms.type=integer, got %q", got)
 	}
 
+	computerUseTool := toolByName["computerUse"]
+	if got := asString(t, computerUseTool["title"]); got != mcpComputerUseToolTitle {
+		t.Fatalf("expected computerUse title %q, got %q", mcpComputerUseToolTitle, got)
+	}
+	if got := asString(t, computerUseTool["description"]); got != mcpComputerUseToolDescription {
+		t.Fatalf("unexpected computerUse description: %q", got)
+	}
+	computerUseInputSchema := mustObject(t, computerUseTool["inputSchema"], "computerUse.inputSchema")
+	assertRequiredContains(t, computerUseInputSchema["required"], "command")
+	computerUseInputProperties := mustObject(t, computerUseInputSchema["properties"], "computerUse.inputSchema.properties")
+	if _, ok := computerUseInputProperties["lease_ttl_sec"]; ok {
+		t.Fatalf("did not expect computerUse.inputSchema.properties.lease_ttl_sec")
+	}
+	computerUseOutputSchema := mustObject(t, computerUseTool["outputSchema"], "computerUse.outputSchema")
+	computerUseOutputProperties := mustObject(t, computerUseOutputSchema["properties"], "computerUse.outputSchema.properties")
+	if _, ok := computerUseOutputProperties["lease_expires_unix_ms"]; ok {
+		t.Fatalf("did not expect computerUse.outputSchema.properties.lease_expires_unix_ms")
+	}
+	computerUseExitCode := mustObject(t, computerUseOutputProperties["exit_code"], "computerUse.outputSchema.properties.exit_code")
+	if got := asString(t, computerUseExitCode["type"]); got != "integer" {
+		t.Fatalf("expected computerUse.exit_code.type=integer, got %q", got)
+	}
+
 	readImageTool := toolByName["readImage"]
 	if got := asString(t, readImageTool["title"]); got != mcpReadImageToolTitle {
 		t.Fatalf("expected readImage title %q, got %q", mcpReadImageToolTitle, got)
@@ -402,6 +428,59 @@ func TestMCPToolCallTerminalExecSuccess(t *testing.T) {
 	structured := mustMapField(t, result, "structuredContent")
 	if got := asString(t, structured["session_id"]); got != "session-1" {
 		t.Fatalf("expected session_id=session-1, got %q", got)
+	}
+}
+
+func TestMCPToolCallComputerUseSuccess(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	router := newMCPTestRouter(t, &fakeMCPDispatcher{
+		submitTask: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
+			if req.Capability != computerUseCapabilityName {
+				t.Fatalf("expected capability=%q, got %q", computerUseCapabilityName, req.Capability)
+			}
+			if req.OwnerID != testDashboardAccountID {
+				t.Fatalf("expected owner_id from token, got %q", req.OwnerID)
+			}
+			payload := computerUsePayload{}
+			if err := json.Unmarshal(req.InputJSON, &payload); err != nil {
+				t.Fatalf("expected valid computerUse payload, got %s", string(req.InputJSON))
+			}
+			if payload.Command != "pwd" {
+				t.Fatalf("unexpected command payload: %#v", payload)
+			}
+			resultJSON, _ := json.Marshal(mcpComputerUseToolOutput{
+				Stdout:          "/workspace\n",
+				Stderr:          "",
+				ExitCode:        0,
+				StdoutTruncated: false,
+				StderrTruncated: false,
+			})
+			return grpcserver.SubmitTaskResult{
+				Task: grpcserver.TaskSnapshot{
+					TaskID:     "task-cu-1",
+					Capability: computerUseCapabilityName,
+					Status:     grpcserver.TaskStatusSucceeded,
+					ResultJSON: resultJSON,
+					CreatedAt:  now,
+					UpdatedAt:  now,
+					DeadlineAt: now.Add(60 * time.Second),
+				},
+				Completed: true,
+			}, nil
+		},
+	})
+
+	payload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"computerUse","arguments":{"command":"pwd","request_id":"req-1"}}}`)
+	result := mustMapField(t, payload, "result")
+	if asBool(result["isError"]) {
+		t.Fatalf("expected tool call success, got error payload=%s", mustJSON(t, result))
+	}
+	structured := mustMapField(t, result, "structuredContent")
+	if got := asString(t, structured["stdout"]); got != "/workspace\n" {
+		t.Fatalf("expected stdout=/workspace\\n, got %q", got)
+	}
+	if got := asInt(t, structured["exit_code"]); got != 0 {
+		t.Fatalf("expected exit_code=0, got %d", got)
 	}
 }
 
@@ -782,10 +861,19 @@ func TestMCPToolCallInvalidParams(t *testing.T) {
 	terminalUnknownField := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"terminalExec","arguments":{"command":"pwd","unknown":"x"}}}`)
 	assertMCPInvalidParamsError(t, terminalUnknownField)
 
-	registerBlankSession := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"  ","file_path":"/workspace/a.txt"}}}`)
+	computerUseBlank := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"computerUse","arguments":{"command":"  "}}}`)
+	assertMCPInvalidParamsError(t, computerUseBlank)
+
+	computerUseUnknownField := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"computerUse","arguments":{"command":"pwd","unknown":"x"}}}`)
+	assertMCPInvalidParamsError(t, computerUseUnknownField)
+
+	computerUseLeaseTTLField := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"computerUse","arguments":{"command":"pwd","lease_ttl_sec":60}}}`)
+	assertMCPInvalidParamsError(t, computerUseLeaseTTLField)
+
+	registerBlankSession := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"  ","file_path":"/workspace/a.txt"}}}`)
 	assertMCPInvalidParamsError(t, registerBlankSession)
 
-	registerUnknownField := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"session-1","file_path":"/workspace/a.txt","unknown":"x"}}}`)
+	registerUnknownField := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"session-1","file_path":"/workspace/a.txt","unknown":"x"}}}`)
 	assertMCPInvalidParamsError(t, registerUnknownField)
 }
 
@@ -796,7 +884,7 @@ func TestMCPToolCallBackendErrorsAsToolErrors(t *testing.T) {
 			return "", grpcserver.ErrNoEchoWorker
 		},
 		submitTask: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
-			if req.Capability == terminalExecCapabilityName || req.Capability == terminalResourceCapabilityName {
+			if req.Capability == terminalExecCapabilityName || req.Capability == terminalResourceCapabilityName || req.Capability == computerUseCapabilityName {
 				return grpcserver.SubmitTaskResult{
 					Task: grpcserver.TaskSnapshot{
 						TaskID:       "task-3",
@@ -838,6 +926,9 @@ func TestMCPToolCallBackendErrorsAsToolErrors(t *testing.T) {
 
 	resourcePayload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"missing","file_path":"/workspace/a.txt"}}}`)
 	assertMCPToolError(t, resourcePayload, terminalExecSessionNotFoundCode+": session not found")
+
+	computerUsePayload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"computerUse","arguments":{"command":"pwd"}}}`)
+	assertMCPToolError(t, computerUsePayload, terminalExecSessionNotFoundCode+": session not found")
 }
 
 func TestMCPGetReturnsMethodNotAllowed(t *testing.T) {

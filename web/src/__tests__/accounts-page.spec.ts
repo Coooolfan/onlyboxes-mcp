@@ -110,21 +110,29 @@ describe('Accounts Page', () => {
       await openCreateAccountBtn?.trigger('click')
       await flushPromises()
 
-      const createAccountModal = wrapper.find('.account-modal')
-      expect(createAccountModal.exists()).toBe(true)
+      const createAccountModal = document.body.querySelector('.account-modal')
+      expect(createAccountModal).toBeTruthy()
 
-      const createAccountNameInput = createAccountModal.find('input[type="text"]')
-      const createAccountPasswordInput = createAccountModal.find('input[type="password"]')
-      expect(createAccountNameInput.exists()).toBe(true)
-      expect(createAccountPasswordInput.exists()).toBe(true)
-      await createAccountNameInput.setValue('member-new')
-      await createAccountPasswordInput.setValue('member-pass')
-      await createAccountModal.get('form.account-form').trigger('submit.prevent')
+      const createAccountNameInput = document.body.querySelector<HTMLInputElement>(
+        '.account-modal input[type="text"]',
+      )
+      const createAccountPasswordInput = document.body.querySelector<HTMLInputElement>(
+        '.account-modal input[type="password"]',
+      )
+      const createAccountForm = document.body.querySelector<HTMLFormElement>('.account-modal form.account-form')
+      expect(createAccountNameInput).toBeTruthy()
+      expect(createAccountPasswordInput).toBeTruthy()
+      expect(createAccountForm).toBeTruthy()
+      createAccountNameInput!.value = 'member-new'
+      createAccountNameInput!.dispatchEvent(new Event('input', { bubbles: true }))
+      createAccountPasswordInput!.value = 'member-pass'
+      createAccountPasswordInput!.dispatchEvent(new Event('input', { bubbles: true }))
+      createAccountForm!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
       await flushPromises()
 
-      expect(wrapper.text()).toContain('Created account member-new')
-      expect((createAccountNameInput.element as HTMLInputElement).value).toBe('')
-      expect((createAccountPasswordInput.element as HTMLInputElement).value).toBe('')
+      expect(document.body.textContent ?? '').toContain('Created account member-new')
+      expect(createAccountNameInput?.value ?? '').toBe('')
+      expect(createAccountPasswordInput?.value ?? '').toBe('')
       const registerCall = fetchMock.mock.calls.find(
         ([url, init]) =>
           String(url) === '/api/v1/console/register' &&
@@ -210,6 +218,8 @@ describe('Accounts Page', () => {
 
     const wrapper = await mountApp('/accounts')
     try {
+      await wrapper.get('header.h-16 .relative > button').trigger('click')
+      await flushPromises()
       const logoutBtn = wrapper.findAll('button').find((button) => button.text() === 'Logout')
       expect(logoutBtn).toBeTruthy()
       await logoutBtn?.trigger('click')
@@ -245,6 +255,8 @@ describe('Accounts Page', () => {
 
     const wrapper = await mountApp('/accounts')
     try {
+      await wrapper.get('header.h-16 .relative > button').trigger('click')
+      await flushPromises()
       const changePasswordBtn = wrapper
         .findAll('button')
         .find((button) => button.text() === 'Change Password')
@@ -252,14 +264,22 @@ describe('Accounts Page', () => {
       await changePasswordBtn?.trigger('click')
       await flushPromises()
 
-      const modal = wrapper.find('.password-modal')
-      expect(modal.exists()).toBe(true)
-      await modal.get('#current-password').setValue('password-test')
-      await modal.get('#new-password').setValue('password-next')
-      await modal.get('form.password-form').trigger('submit.prevent')
+      const modal = document.body.querySelector('.password-modal')
+      expect(modal).toBeTruthy()
+      const currentInput = document.body.querySelector<HTMLInputElement>('#current-password')
+      const newInput = document.body.querySelector<HTMLInputElement>('#new-password')
+      const form = document.body.querySelector<HTMLFormElement>('form.password-form')
+      expect(currentInput).toBeTruthy()
+      expect(newInput).toBeTruthy()
+      expect(form).toBeTruthy()
+      currentInput!.value = 'password-test'
+      currentInput!.dispatchEvent(new Event('input', { bubbles: true }))
+      newInput!.value = 'password-next'
+      newInput!.dispatchEvent(new Event('input', { bubbles: true }))
+      form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
       await flushPromises()
 
-      expect(wrapper.text()).toContain('Password updated successfully.')
+      expect(document.body.textContent ?? '').toContain('Password updated successfully.')
       const passwordCall = fetchMock.mock.calls.find(
         ([url, init]) =>
           String(url) === '/api/v1/console/password' &&
