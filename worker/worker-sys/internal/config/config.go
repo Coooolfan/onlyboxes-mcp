@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"strconv"
 	"strings"
@@ -10,12 +11,15 @@ import (
 )
 
 const (
-	defaultConsoleTarget            = "127.0.0.1:50051"
-	defaultHeartbeatIntervalSec     = 5
-	defaultHeartbeatJitterPct       = 20
-	defaultCallTimeoutSec           = 3
-	defaultExecutorKind             = "sys"
-	defaultComputerUseOutputMaxByte = 1024 * 1024
+	defaultConsoleTarget             = "127.0.0.1:50051"
+	defaultHeartbeatIntervalSec      = 5
+	defaultHeartbeatJitterPct        = 20
+	defaultCallTimeoutSec            = 3
+	defaultExecutorKind              = "sys"
+	defaultComputerUseOutputMaxByte  = 1024 * 1024
+	computerUseWhitelistModePrefix   = "prefix"
+	computerUseWhitelistModeExact    = "exact"
+	computerUseWhitelistModeAllowAll = "allow_all"
 )
 
 type Config struct {
@@ -31,6 +35,8 @@ type Config struct {
 	Version                    string
 	Labels                     map[string]string
 	ComputerUseOutputLimitByte int
+	ComputerUseWhitelistMode   string
+	ComputerUseWhitelist       []string
 }
 
 func Load() Config {
@@ -38,6 +44,8 @@ func Load() Config {
 	heartbeatJitter := parsePercentEnv("WORKER_HEARTBEAT_JITTER_PCT", defaultHeartbeatJitterPct)
 	callTimeoutSec := parsePositiveIntEnv("WORKER_CALL_TIMEOUT_SEC", defaultCallTimeoutSec)
 	outputLimit := parsePositiveIntEnv("WORKER_COMPUTER_USE_OUTPUT_LIMIT_BYTES", defaultComputerUseOutputMaxByte)
+	whitelistMode := parseComputerUseWhitelistMode(os.Getenv("WORKER_COMPUTER_USE_COMMAND_WHITELIST_MODE"))
+	whitelist := parseComputerUseWhitelist(os.Getenv("WORKER_COMPUTER_USE_COMMAND_WHITELIST"))
 
 	defaultVersion := strings.TrimSpace(buildinfo.Version)
 	if defaultVersion == "" {
@@ -57,6 +65,8 @@ func Load() Config {
 		Version:                    getEnv("WORKER_VERSION", defaultVersion),
 		Labels:                     parseLabels(os.Getenv("WORKER_LABELS")),
 		ComputerUseOutputLimitByte: outputLimit,
+		ComputerUseWhitelistMode:   whitelistMode,
+		ComputerUseWhitelist:       whitelist,
 	}
 }
 
@@ -115,4 +125,41 @@ func parseLabels(raw string) map[string]string {
 		labels[key] = value
 	}
 	return labels
+}
+
+func parseComputerUseWhitelistMode(raw string) string {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	switch mode {
+	case computerUseWhitelistModePrefix, computerUseWhitelistModeExact, computerUseWhitelistModeAllowAll:
+		return mode
+	default:
+		return computerUseWhitelistModeExact
+	}
+}
+
+func parseComputerUseWhitelist(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return []string{}
+	}
+
+	decoded := []string{}
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return []string{}
+	}
+
+	result := make([]string, 0, len(decoded))
+	seen := make(map[string]struct{}, len(decoded))
+	for _, entry := range decoded {
+		value := strings.TrimSpace(entry)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+
+	return result
 }

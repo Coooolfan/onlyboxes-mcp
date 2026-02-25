@@ -10,8 +10,12 @@ import (
 )
 
 const (
-	computerUseNotReadyMessage    = "computerUse executor is unavailable"
-	computerUseCodeInvalidPayload = "invalid_payload"
+	computerUseNotReadyMessage       = "computerUse executor is unavailable"
+	computerUseCodeInvalidPayload    = "invalid_payload"
+	computerUseCodeCommandNotAllowed = "command_not_allowed"
+	computerUseWhitelistModePrefix   = "prefix"
+	computerUseWhitelistModeExact    = "exact"
+	computerUseWhitelistModeAllowAll = "allow_all"
 )
 
 type computerUsePayload struct {
@@ -58,10 +62,14 @@ func newComputerUseError(code string, message string) *computerUseError {
 
 type computerUseExecutorConfig struct {
 	OutputLimitBytes int
+	WhitelistMode    string
+	Whitelist        []string
 }
 
 type computerUseExecutor struct {
 	outputLimitBytes int
+	whitelistMode    string
+	whitelist        []string
 }
 
 func newComputerUseExecutor(cfg computerUseExecutorConfig) *computerUseExecutor {
@@ -72,6 +80,8 @@ func newComputerUseExecutor(cfg computerUseExecutorConfig) *computerUseExecutor 
 
 	return &computerUseExecutor{
 		outputLimitBytes: outputLimit,
+		whitelistMode:    cfg.WhitelistMode,
+		whitelist:        cfg.Whitelist,
 	}
 }
 
@@ -83,6 +93,9 @@ func (e *computerUseExecutor) Execute(ctx context.Context, req computerUseReques
 	command := strings.TrimSpace(req.Command)
 	if command == "" {
 		return computerUseRunResult{}, newComputerUseError(computerUseCodeInvalidPayload, "command is required")
+	}
+	if !e.isCommandAllowed(command) {
+		return computerUseRunResult{}, newComputerUseError(computerUseCodeCommandNotAllowed, "command is blocked by whitelist policy")
 	}
 
 	execCmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
@@ -127,4 +140,29 @@ func truncateByBytes(value string, maxBytes int) (string, bool) {
 		return value, false
 	}
 	return value[:maxBytes], true
+}
+
+func (e *computerUseExecutor) isCommandAllowed(command string) bool {
+	if e == nil {
+		return false
+	}
+
+	switch e.whitelistMode {
+	case computerUseWhitelistModeAllowAll:
+		return true
+	case computerUseWhitelistModePrefix:
+		for _, entry := range e.whitelist {
+			if strings.HasPrefix(command, entry) {
+				return true
+			}
+		}
+		return false
+	default:
+		for _, entry := range e.whitelist {
+			if command == entry {
+				return true
+			}
+		}
+		return false
+	}
 }

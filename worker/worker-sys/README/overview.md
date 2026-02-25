@@ -26,6 +26,14 @@ Worker type and capability contract:
 `computerUse` behavior:
 - expected payload: `{"command":"..."}`
 - `command` is required and executed via `/bin/sh -lc`.
+- whitelist policy can block commands before execution:
+  - mode env: `WORKER_COMPUTER_USE_COMMAND_WHITELIST_MODE`
+  - whitelist env: `WORKER_COMPUTER_USE_COMMAND_WHITELIST` (JSON string array, e.g. `["echo","time"]`)
+  - mode values:
+    - `exact` (default): command must equal one whitelist entry
+    - `prefix`: command must start with one whitelist entry
+    - `allow_all`: allow all commands (whitelist value is ignored)
+  - in `exact`/`prefix` mode, empty or invalid whitelist blocks all commands.
 - output fields:
   - `stdout`
   - `stderr`
@@ -34,6 +42,7 @@ Worker type and capability contract:
   - `stderr_truncated`
 - non-zero process exit is returned in `exit_code` (not a command error by itself).
 - output truncation is per stream and controlled by `WORKER_COMPUTER_USE_OUTPUT_LIMIT_BYTES`.
+- worker startup logs include whitelist mode and whitelist entry count.
 
 Defaults:
 - Console target: `127.0.0.1:50051`
@@ -53,3 +62,40 @@ Config env:
 - `WORKER_HEARTBEAT_JITTER_PCT`
 - `WORKER_CALL_TIMEOUT_SEC`
 - `WORKER_COMPUTER_USE_OUTPUT_LIMIT_BYTES`
+- `WORKER_COMPUTER_USE_COMMAND_WHITELIST_MODE`
+- `WORKER_COMPUTER_USE_COMMAND_WHITELIST`
+
+Startup examples:
+
+```bash
+# Example 1: exact mode (default). Only exact "echo" or "time" is allowed.
+# WORKER_CONSOLE_INSECURE=true is for local plaintext demo only.
+WORKER_CONSOLE_INSECURE=true \
+WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 \
+WORKER_ID=<worker_id> \
+WORKER_SECRET=<worker_secret> \
+WORKER_COMPUTER_USE_COMMAND_WHITELIST_MODE=exact \
+WORKER_COMPUTER_USE_COMMAND_WHITELIST='["echo","time"]' \
+./onlyboxes-worker-sys
+```
+
+```bash
+# Example 2: prefix mode. Allows commands starting with "echo " or "time ".
+WORKER_CONSOLE_INSECURE=true \
+WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 \
+WORKER_ID=<worker_id> \
+WORKER_SECRET=<worker_secret> \
+WORKER_COMPUTER_USE_COMMAND_WHITELIST_MODE=prefix \
+WORKER_COMPUTER_USE_COMMAND_WHITELIST='["echo ","time "]' \
+./onlyboxes-worker-sys
+```
+
+```bash
+# Example 3: allow_all mode. Whitelist value is ignored in this mode.
+WORKER_CONSOLE_INSECURE=true \
+WORKER_CONSOLE_GRPC_TARGET=127.0.0.1:50051 \
+WORKER_ID=<worker_id> \
+WORKER_SECRET=<worker_secret> \
+WORKER_COMPUTER_USE_COMMAND_WHITELIST_MODE=allow_all \
+./onlyboxes-worker-sys
+```

@@ -34,12 +34,19 @@ func Run(ctx context.Context, cfg config.Config) error {
 
 	executor := newComputerUseExecutor(computerUseExecutorConfig{
 		OutputLimitBytes: cfg.ComputerUseOutputLimitByte,
+		WhitelistMode:    cfg.ComputerUseWhitelistMode,
+		Whitelist:        cfg.ComputerUseWhitelist,
 	})
 	originalRunComputerUse := runComputerUse
 	runComputerUse = executor.Execute
 	defer func() {
 		runComputerUse = originalRunComputerUse
 	}()
+	logging.Infof(
+		"computerUse whitelist configured: mode=%s count=%d",
+		cfg.ComputerUseWhitelistMode,
+		len(cfg.ComputerUseWhitelist),
+	)
 
 	reconnectDelay := initialReconnectDelay
 	for {
