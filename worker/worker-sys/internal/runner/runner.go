@@ -3,11 +3,11 @@ package runner
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/onlyboxes/onlyboxes/worker/worker-sys/internal/config"
+	"github.com/onlyboxes/onlyboxes/worker/worker-sys/internal/logging"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -57,10 +57,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 
 		if status.Code(err) == codes.FailedPrecondition {
-			log.Printf("registry session replaced for node_id=%s, reconnecting", cfg.WorkerID)
+			logging.Warnf("registry session replaced for node_id=%s, reconnecting", cfg.WorkerID)
 			reconnectDelay = initialReconnectDelay
 		} else {
-			log.Printf("registry session interrupted: %v", err)
+			logging.Warnf("registry session interrupted: %v", err)
 		}
 
 		if err := waitReconnect(ctx, reconnectDelay); err != nil {

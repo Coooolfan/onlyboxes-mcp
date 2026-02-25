@@ -4,15 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"strings"
 	"time"
 
 	registryv1 "github.com/onlyboxes/onlyboxes/api/gen/go/registry/v1"
 	"github.com/onlyboxes/onlyboxes/worker/worker-sys/internal/config"
+	"github.com/onlyboxes/onlyboxes/worker/worker-sys/internal/logging"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -64,7 +65,7 @@ func runSession(ctx context.Context, cfg config.Config) error {
 	}
 
 	heartbeatInterval := durationFromServer(ack.GetHeartbeatIntervalSec(), cfg.HeartbeatInterval)
-	log.Printf("worker connected: node_id=%s node_name=%s session_id=%s", hello.GetNodeId(), hello.GetNodeName(), sessionID)
+	logging.Infof("worker connected: node_id=%s node_name=%s session_id=%s", hello.GetNodeId(), hello.GetNodeName(), sessionID)
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -76,7 +77,7 @@ func runSession(ctx context.Context, cfg config.Config) error {
 	commandExecSlots <- struct{}{}
 
 	go senderLoop(sessionCtx, stream, outbound, sessionErrCh)
-	go receiverLoop(sessionCtx, stream, outbound, heartbeatAckCh, sessionErrCh, cfg.WorkerID, commandExecSlots)
+	go receiverLoop(sessionCtx, stream, outbound, heartbeatAckCh, sessionErrCh, commandExecSlots)
 
 	return heartbeatLoop(sessionCtx, outbound, heartbeatAckCh, sessionErrCh, cfg, sessionID, heartbeatInterval)
 }
@@ -122,7 +123,6 @@ func receiverLoop(
 	outbound chan<- *registryv1.ConnectRequest,
 	heartbeatAckCh chan<- *registryv1.HeartbeatAck,
 	errCh chan<- error,
-	nodeID string,
 	commandExecSlots chan struct{},
 ) {
 	for {
@@ -143,12 +143,12 @@ func receiverLoop(
 			dispatch := resp.GetCommandDispatch()
 			capability := strings.TrimSpace(strings.ToLower(dispatch.GetCapability()))
 			commandID := strings.TrimSpace(dispatch.GetCommandId())
-			log.Printf(
-				"command dispatch received: node_id=%s command_id=%s capability=%s payload_len=%d",
-				nodeID,
+			commandText := commandDispatchTextForLog(capability, dispatch.GetPayloadJson())
+			logging.Infof(
+				"command dispatch received: command_id=%s capability=%s command=%s",
 				commandID,
 				capability,
-				len(dispatch.GetPayloadJson()),
+				commandText,
 			)
 
 			dispatchCopy, ok := proto.Clone(dispatch).(*registryv1.CommandDispatch)
@@ -164,6 +164,24 @@ func receiverLoop(
 			reportSessionErr(errCh, errors.New("unexpected response frame"))
 			return
 		}
+	}
+}
+
+func commandDispatchTextForLog(capability string, payload []byte) string {
+	rawPayload := strings.TrimSpace(string(payload))
+	switch capability {
+	case computerUseCapabilityName:
+		decoded := computerUsePayload{}
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			return rawPayload
+		}
+		command := strings.TrimSpace(decoded.Command)
+		if command == "" {
+			return rawPayload
+		}
+		return command
+	default:
+		return rawPayload
 	}
 }
 

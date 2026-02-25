@@ -147,3 +147,56 @@ func TestHandleCommandDispatchRunsExecutionAndReleasesSlot(t *testing.T) {
 		t.Fatalf("expected slot to be released after execution")
 	}
 }
+
+func TestCommandDispatchTextForLogComputerUsePayload(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		capability string
+		payload    []byte
+		want       string
+	}{
+		{
+			name:       "computer_use_command",
+			capability: computerUseCapabilityName,
+			payload:    []byte(`{"command":"pwd"}`),
+			want:       "pwd",
+		},
+		{
+			name:       "computer_use_multiline_command",
+			capability: computerUseCapabilityName,
+			payload:    []byte("{\"command\":\"echo first\\necho second\"}"),
+			want:       "echo first\necho second",
+		},
+		{
+			name:       "computer_use_invalid_payload_falls_back_to_raw",
+			capability: computerUseCapabilityName,
+			payload:    []byte("not-json"),
+			want:       "not-json",
+		},
+		{
+			name:       "computer_use_empty_command_falls_back_to_raw",
+			capability: computerUseCapabilityName,
+			payload:    []byte(`{"command":"   "}`),
+			want:       `{"command":"   "}`,
+		},
+		{
+			name:       "unsupported_capability_uses_raw_payload",
+			capability: "unknown",
+			payload:    []byte(`{"command":"pwd"}`),
+			want:       `{"command":"pwd"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := commandDispatchTextForLog(tc.capability, tc.payload)
+			if got != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, got)
+			}
+		})
+	}
+}

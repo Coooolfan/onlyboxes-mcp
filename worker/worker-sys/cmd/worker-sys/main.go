@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
 	"os/signal"
 	"syscall"
 
 	"github.com/onlyboxes/onlyboxes/worker/worker-sys/internal/config"
+	"github.com/onlyboxes/onlyboxes/worker/worker-sys/internal/logging"
 	"github.com/onlyboxes/onlyboxes/worker/worker-sys/internal/runner"
 )
 
@@ -18,9 +18,9 @@ func main() {
 
 	if err := runner.Run(ctx, cfg); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			log.Printf("worker stopped: %v", err)
+			logging.Infof("worker stopped: %v", err)
 			return
 		}
-		log.Fatalf("worker stopped with error: %v", err)
+		logging.Fatalf("worker stopped with error: %v", err)
 	}
 }
