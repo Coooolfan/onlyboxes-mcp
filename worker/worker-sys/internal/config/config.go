@@ -14,7 +14,6 @@ const (
 	defaultConsoleTarget             = "127.0.0.1:50051"
 	defaultHeartbeatIntervalSec      = 5
 	defaultHeartbeatJitterPct        = 20
-	defaultCallTimeoutSec            = 3
 	defaultExecutorKind              = "sys"
 	defaultComputerUseOutputMaxByte  = 1024 * 1024
 	computerUseWhitelistModePrefix   = "prefix"
@@ -42,7 +41,7 @@ type Config struct {
 func Load() Config {
 	heartbeatSec := parsePositiveIntEnv("WORKER_HEARTBEAT_INTERVAL_SEC", defaultHeartbeatIntervalSec)
 	heartbeatJitter := parsePercentEnv("WORKER_HEARTBEAT_JITTER_PCT", defaultHeartbeatJitterPct)
-	callTimeoutSec := parsePositiveIntEnv("WORKER_CALL_TIMEOUT_SEC", defaultCallTimeoutSec)
+	callTimeoutSec := parsePositiveIntEnv("WORKER_CALL_TIMEOUT_SEC", defaultCallTimeoutSec(heartbeatSec))
 	outputLimit := parsePositiveIntEnv("WORKER_COMPUTER_USE_OUTPUT_LIMIT_BYTES", defaultComputerUseOutputMaxByte)
 	whitelistMode := parseComputerUseWhitelistMode(os.Getenv("WORKER_COMPUTER_USE_COMMAND_WHITELIST_MODE"))
 	whitelist := parseComputerUseWhitelist(os.Getenv("WORKER_COMPUTER_USE_COMMAND_WHITELIST"))
@@ -100,6 +99,14 @@ func parsePercentEnv(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return parsed
+}
+
+func defaultCallTimeoutSec(heartbeatSec int) int {
+	if heartbeatSec <= 0 {
+		heartbeatSec = defaultHeartbeatIntervalSec
+	}
+	// ceil(2.5 * heartbeatSec) without floating point.
+	return (heartbeatSec*5 + 1) / 2
 }
 
 func parseLabels(raw string) map[string]string {

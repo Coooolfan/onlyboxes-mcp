@@ -1,6 +1,8 @@
 # Worker Sys Overview: !!!POC Only!!!
 
 `worker-sys` connects to console over gRPC bidi stream `Connect`, sends hello (`worker_secret`), sends periodic heartbeats, and handles `computerUse` command dispatch/result in the same stream.
+- heartbeat reconnect policy: worker tolerates one heartbeat ack timeout and reconnects after two consecutive heartbeat ack timeouts.
+- `WORKER_CALL_TIMEOUT_SEC` default is dynamic: `ceil(2.5 * WORKER_HEARTBEAT_INTERVAL_SEC)`.
 
 Security warning (high risk):
 - `computerUse` runs shell directly on the worker host (`/bin/sh -lc`).
@@ -48,7 +50,11 @@ Defaults:
 - Console target: `127.0.0.1:50051`
 - Heartbeat interval: `5s`
 - Heartbeat jitter: `20%`
+- Call timeout: `ceil(2.5 * WORKER_HEARTBEAT_INTERVAL_SEC)` (default heartbeat `5s` => `13s`)
 - Output limit: `1048576` bytes per stream (`stdout`/`stderr`)
+
+Recommended setting:
+- `WORKER_CALL_TIMEOUT_SEC >= 2 * WORKER_HEARTBEAT_INTERVAL_SEC`
 
 Config env:
 - `WORKER_CONSOLE_GRPC_TARGET`

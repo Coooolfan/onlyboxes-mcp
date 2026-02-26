@@ -121,6 +121,77 @@ func TestRunSessionReceivesFailedPreconditionFromServer(t *testing.T) {
 	}
 }
 
+func TestHeartbeatLoopToleratesSingleAckTimeout(t *testing.T) {
+	cfg := testConfig()
+	cfg.CallTimeout = 20 * time.Millisecond
+	cfg.HeartbeatJitter = 0
+
+	outbound := make(chan *registryv1.ConnectRequest, 4)
+	heartbeatAckCh := make(chan *registryv1.HeartbeatAck, 1)
+	sessionErrCh := make(chan error, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	doneCh := make(chan error, 1)
+	go func() {
+		doneCh <- heartbeatLoop(ctx, outbound, heartbeatAckCh, sessionErrCh, cfg, "session-1", 10*time.Millisecond)
+	}()
+
+	receivedHeartbeats := 0
+	timeout := time.After(2 * time.Second)
+	for receivedHeartbeats < 2 {
+		select {
+		case <-timeout:
+			t.Fatal("timed out waiting for second heartbeat")
+		case req := <-outbound:
+			if req.GetHeartbeat() == nil {
+				t.Fatalf("expected heartbeat frame, got %#v", req.GetPayload())
+			}
+			receivedHeartbeats++
+			if receivedHeartbeats == 2 {
+				heartbeatAckCh <- &registryv1.HeartbeatAck{HeartbeatIntervalSec: 1}
+				cancel()
+			}
+		}
+	}
+
+	err := <-doneCh
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled after single ack timeout recovery, got %v", err)
+	}
+}
+
+func TestHeartbeatLoopFailsAfterTwoConsecutiveAckTimeouts(t *testing.T) {
+	cfg := testConfig()
+	cfg.CallTimeout = 20 * time.Millisecond
+	cfg.HeartbeatJitter = 0
+
+	outbound := make(chan *registryv1.ConnectRequest, 8)
+	heartbeatAckCh := make(chan *registryv1.HeartbeatAck, 1)
+	sessionErrCh := make(chan error, 1)
+
+	err := heartbeatLoop(context.Background(), outbound, heartbeatAckCh, sessionErrCh, cfg, "session-1", 10*time.Millisecond)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded after two consecutive ack timeouts, got %v", err)
+	}
+
+	receivedHeartbeats := 0
+	for {
+		select {
+		case req := <-outbound:
+			if req.GetHeartbeat() != nil {
+				receivedHeartbeats++
+			}
+		default:
+			if receivedHeartbeats < 2 {
+				t.Fatalf("expected at least two heartbeat frames before failure, got %d", receivedHeartbeats)
+			}
+			return
+		}
+	}
+}
+
 func TestRunRejectsMissingWorkerIdentity(t *testing.T) {
 	cfg := testConfig()
 	cfg.WorkerID = ""

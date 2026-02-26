@@ -236,6 +236,7 @@ func heartbeatLoop(
 	heartbeatInterval time.Duration,
 ) error {
 	interval := heartbeatInterval
+	consecutiveAckTimeouts := 0
 
 	for {
 		waitFor := applyJitter(interval, cfg.HeartbeatJitter)
@@ -272,9 +273,14 @@ func heartbeatLoop(
 				ackTimer.Stop()
 				return err
 			case <-ackTimer.C:
-				return context.DeadlineExceeded
+				consecutiveAckTimeouts++
+				if consecutiveAckTimeouts >= 2 {
+					return context.DeadlineExceeded
+				}
+				waitAck = false
 			case heartbeatAck := <-heartbeatAckCh:
 				ackTimer.Stop()
+				consecutiveAckTimeouts = 0
 				interval = durationFromServer(heartbeatAck.GetHeartbeatIntervalSec(), interval)
 				waitAck = false
 			}

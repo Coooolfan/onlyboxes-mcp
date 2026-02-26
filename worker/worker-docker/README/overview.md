@@ -1,6 +1,8 @@
 # Worker Docker Overview
 
 `worker-docker` connects to console over gRPC bidi stream `Connect`, sends a hello frame (including `worker_secret`), then sends periodic heartbeat frames and handles command dispatch/result in the same stream.
+- heartbeat reconnect policy: worker tolerates one heartbeat ack timeout and reconnects after two consecutive heartbeat ack timeouts.
+- `WORKER_CALL_TIMEOUT_SEC` default is dynamic: `ceil(2.5 * WORKER_HEARTBEAT_INTERVAL_SEC)`.
 
 Security warning (high risk):
 - console gRPC currently has no built-in TLS/mTLS.
@@ -75,7 +77,11 @@ Defaults:
 - Console target: `127.0.0.1:50051`
 - Heartbeat interval: `5s`
 - Heartbeat jitter: `20%`
+- Call timeout: `ceil(2.5 * WORKER_HEARTBEAT_INTERVAL_SEC)` (default heartbeat `5s` => `13s`)
 - pythonExec image: `python:slim`
 - terminalExec image: `coolfan1024/onlyboxes-default-worker:0.0.3`
 - terminal lease min/max/default: `60s` / `1800s` / `60s`
 - terminal output limit: `1048576` bytes per stream (`stdout`/`stderr`)
+
+Recommended setting:
+- `WORKER_CALL_TIMEOUT_SEC >= 2 * WORKER_HEARTBEAT_INTERVAL_SEC`

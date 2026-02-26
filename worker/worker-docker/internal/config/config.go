@@ -13,7 +13,6 @@ const (
 	defaultConsoleTarget     = "127.0.0.1:50051"
 	defaultHeartbeatInterval = 5
 	defaultHeartbeatJitter   = 20
-	defaultCallTimeout       = 3
 	defaultExecutorKind      = "docker"
 	defaultPythonExecImage   = "python:slim"
 	defaultTerminalExecImage = "coolfan1024/onlyboxes-default-worker:0.0.3"
@@ -46,7 +45,7 @@ type Config struct {
 func Load() Config {
 	heartbeatSec := parsePositiveIntEnv("WORKER_HEARTBEAT_INTERVAL_SEC", defaultHeartbeatInterval)
 	heartbeatJitter := parsePercentEnv("WORKER_HEARTBEAT_JITTER_PCT", defaultHeartbeatJitter)
-	callTimeoutSec := parsePositiveIntEnv("WORKER_CALL_TIMEOUT_SEC", defaultCallTimeout)
+	callTimeoutSec := parsePositiveIntEnv("WORKER_CALL_TIMEOUT_SEC", defaultCallTimeoutSec(heartbeatSec))
 	terminalLeaseMinSec := parsePositiveIntEnv("WORKER_TERMINAL_LEASE_MIN_SEC", defaultTerminalLeaseMin)
 	terminalLeaseMaxSec := parsePositiveIntEnv("WORKER_TERMINAL_LEASE_MAX_SEC", defaultTerminalLeaseMax)
 	if terminalLeaseMaxSec < terminalLeaseMinSec {
@@ -113,6 +112,14 @@ func parsePercentEnv(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return parsed
+}
+
+func defaultCallTimeoutSec(heartbeatSec int) int {
+	if heartbeatSec <= 0 {
+		heartbeatSec = defaultHeartbeatInterval
+	}
+	// ceil(2.5 * heartbeatSec) without floating point.
+	return (heartbeatSec*5 + 1) / 2
 }
 
 func parseLabels(raw string) map[string]string {
