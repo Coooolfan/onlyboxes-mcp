@@ -278,7 +278,6 @@ onBeforeUnmount(() => {
         :loading="workersStore.loading"
         :deleting-node-id="workersStore.deletingNodeID"
         :format-capabilities="workersStore.formatCapabilities"
-        :format-labels="workersStore.formatLabels"
         :format-date-time="workersStore.formatDateTime"
         :format-age="workersStore.formatAge"
         :delete-worker-button-text="workersStore.deleteWorkerButtonText"

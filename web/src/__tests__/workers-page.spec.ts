@@ -281,6 +281,63 @@ describe('Workers Page', () => {
     }
   })
 
+  it('renders labels as per-line badges with vertical scroll', async () => {
+    const workersWithManyLabels = {
+      ...workersPayload,
+      items: [
+        {
+          ...workersPayload.items[0],
+          labels: {
+            zone: 'a',
+            region: 'us-west',
+            env: 'prod',
+            team: 'core',
+            tier: 'backend',
+            runtime: 'docker',
+          },
+        },
+      ],
+    }
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/console/session') {
+        return jsonResponse(adminSessionPayload)
+      }
+      if (url.startsWith('/api/v1/workers/stats')) {
+        return jsonResponse(statsPayload)
+      }
+      if (url.startsWith('/api/v1/workers/inflight')) {
+        return jsonResponse(inflightPayload)
+      }
+      if (url.startsWith('/api/v1/workers?')) {
+        return jsonResponse(workersWithManyLabels)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = await mountApp('/workers')
+    try {
+      const labelList = wrapper.find('.worker-label-list')
+      expect(labelList.exists()).toBeTruthy()
+      expect(labelList.classes()).toContain('max-h-24')
+      expect(labelList.classes()).toContain('overflow-y-auto')
+
+      const labelBadges = wrapper.findAll('.worker-label-badge')
+      expect(labelBadges).toHaveLength(6)
+      const labelTexts = labelBadges.map((item) => item.text())
+      expect(labelTexts).toContain('zone=a')
+      expect(labelTexts).toContain('region=us-west')
+      expect(labelTexts).toContain('env=prod')
+      expect(labelTexts).toContain('team=core')
+      expect(labelTexts).toContain('tier=backend')
+      expect(labelTexts).toContain('runtime=docker')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('syncs status/page from query and back to URL', async () => {
     const pagedWorkersPayload = {
       ...workersPayload,

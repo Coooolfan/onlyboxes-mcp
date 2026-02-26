@@ -9,7 +9,6 @@ const props = defineProps<{
   loading: boolean
   deletingNodeId: string
   formatCapabilities: (worker: WorkerItem) => string
-  formatLabels: (worker: WorkerItem) => string
   formatDateTime: (value: string) => string
   formatAge: (value: string) => string
   deleteWorkerButtonText: (nodeID: string) => string
@@ -148,7 +147,19 @@ function getInflight(nodeId: string, capName: string): InflightCapability | null
             <span v-else>--</span>
           </td>
           <td class="text-left px-6 py-4 border-b border-stroke text-sm text-primary align-middle">
-            {{ formatLabels(worker) }}
+            <div
+              v-if="worker.labels && Object.keys(worker.labels).length > 0"
+              class="worker-label-list flex max-h-24 flex-col gap-1 overflow-y-auto pr-1"
+            >
+              <span
+                v-for="(value, key) in worker.labels"
+                :key="`${worker.node_id}-${key}`"
+                class="worker-label-badge inline-flex w-fit items-center rounded-default border border-stroke bg-surface-soft px-2 py-1 font-mono text-[11px] leading-4 text-secondary"
+              >
+                {{ key }}={{ value }}
+              </span>
+            </div>
+            <span v-else>--</span>
           </td>
           <td class="text-left px-6 py-4 border-b border-stroke text-sm text-primary align-middle">
             <span

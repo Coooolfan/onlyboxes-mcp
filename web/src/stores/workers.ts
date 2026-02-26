@@ -235,14 +235,6 @@ export const useWorkersStore = defineStore('workers', () => {
     return worker.capabilities.map((item) => item.name).join(', ')
   }
 
-  function formatLabels(worker: WorkerItem): string {
-    const entries = Object.entries(worker.labels ?? {})
-    if (entries.length === 0) {
-      return '--'
-    }
-    return entries.map(([key, value]) => `${key}=${value}`).join(' · ')
-  }
-
   async function createWorker(workerType: WorkerType): Promise<WorkerStartupCommandResponse | null> {
     if (creatingWorker.value) {
       return null
@@ -390,7 +382,6 @@ export const useWorkersStore = defineStore('workers', () => {
     formatDateTime,
     formatAge,
     formatCapabilities,
-    formatLabels,
     createWorker,
     deleteWorker,
     toggleAutoRefresh,
