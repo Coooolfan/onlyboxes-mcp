@@ -59,6 +59,18 @@ func TestEmbeddedWebFallbackDoesNotInterceptAPI(t *testing.T) {
 	}
 }
 
+func TestEmbeddedWebFallbackDoesNotInterceptUppercaseAPI(t *testing.T) {
+	router := newWebStaticTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/API/v1/workers", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestEmbeddedWebFallbackDoesNotInterceptMCP(t *testing.T) {
 	router := newWebStaticTestRouter(t)
 
@@ -70,6 +82,27 @@ func TestEmbeddedWebFallbackDoesNotInterceptMCP(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEmbeddedWebFallbackDoesNotInterceptUppercaseMCP(t *testing.T) {
+	router := newWebStaticTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/MCP", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRouterKeepsRedirectFixedPathDisabled(t *testing.T) {
+	handler := NewWorkerHandler(registrytest.NewStore(t), 15*time.Second, nil, nil, nil, "")
+	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
+
+	if router.RedirectFixedPath {
+		t.Fatalf("expected RedirectFixedPath to remain false")
 	}
 }
 
