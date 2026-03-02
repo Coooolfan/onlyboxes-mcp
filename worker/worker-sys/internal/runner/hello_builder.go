@@ -30,6 +30,10 @@ func buildHello(cfg config.Config) (*registryv1.ConnectHello, error) {
 				Name:        computerUseCapabilityDeclared,
 				MaxInflight: computerUseCapabilityMaxInflight,
 			},
+			{
+				Name:        readImageCapabilityDeclared,
+				MaxInflight: readImageCapabilityMaxInflight,
+			},
 		},
 	}
 	return hello, nil

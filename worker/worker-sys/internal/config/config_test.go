@@ -81,6 +81,34 @@ func TestLoadUsesEmptyComputerUseWhitelistWhenInvalid(t *testing.T) {
 	}
 }
 
+func TestLoadUsesEmptyReadImageAllowedPathsByDefault(t *testing.T) {
+	t.Setenv("WORKER_READ_IMAGE_ALLOWED_PATHS", "")
+
+	cfg := Load()
+	if len(cfg.ReadImageAllowedPaths) != 0 {
+		t.Fatalf("expected empty readImage allowed paths, got %v", cfg.ReadImageAllowedPaths)
+	}
+}
+
+func TestLoadParsesReadImageAllowedPaths(t *testing.T) {
+	t.Setenv("WORKER_READ_IMAGE_ALLOWED_PATHS", `[" /data/images ","/tmp/a.png","","/tmp/a.png"]`)
+
+	cfg := Load()
+	want := []string{"/data/images", "/tmp/a.png"}
+	if !reflect.DeepEqual(cfg.ReadImageAllowedPaths, want) {
+		t.Fatalf("unexpected readImage allowed paths: want=%v got=%v", want, cfg.ReadImageAllowedPaths)
+	}
+}
+
+func TestLoadUsesEmptyReadImageAllowedPathsWhenInvalid(t *testing.T) {
+	t.Setenv("WORKER_READ_IMAGE_ALLOWED_PATHS", `{"not":"array"}`)
+
+	cfg := Load()
+	if len(cfg.ReadImageAllowedPaths) != 0 {
+		t.Fatalf("expected empty readImage allowed paths, got %v", cfg.ReadImageAllowedPaths)
+	}
+}
+
 func TestLoadUsesDynamicCallTimeoutDefault(t *testing.T) {
 	t.Setenv("WORKER_HEARTBEAT_INTERVAL_SEC", "5")
 	t.Setenv("WORKER_CALL_TIMEOUT_SEC", "")

@@ -21,8 +21,8 @@ These values are returned by `console` when calling `POST /api/v1/workers`.
 
 Worker type and capability contract:
 - worker type is `worker-sys`.
-- hello declares only one capability: `computerUse`.
-- `computerUse.max_inflight` is fixed to `1`.
+- hello declares two capabilities: `computerUse` and `readImage`.
+- `computerUse.max_inflight` and `readImage.max_inflight` are fixed to `1`.
 - console enforces that `worker-sys` cannot register any other capability.
 
 `computerUse` behavior:
@@ -45,6 +45,24 @@ Worker type and capability contract:
 - non-zero process exit is returned in `exit_code` (not a command error by itself).
 - output truncation is per stream and controlled by `WORKER_COMPUTER_USE_OUTPUT_LIMIT_BYTES`.
 - worker startup logs include whitelist mode and whitelist entry count.
+
+`readImage` behavior:
+- expected payload: `{"session_id":"computerUse","file_path":"...","action":"validate|read"}`
+- accepts only `session_id="computerUse"`; any other value returns `session_not_found`.
+- `file_path` is required.
+- allowed path policy env: `WORKER_READ_IMAGE_ALLOWED_PATHS` (JSON string array, supports file and directory entries).
+- deny by default: empty/missing/invalid `WORKER_READ_IMAGE_ALLOWED_PATHS` blocks all `readImage` access.
+- path check is two-stage (normalized lexical check + symlink-resolved real path check).
+- read flow binds path validation to the opened file descriptor and verifies path/file identity consistency to mitigate TOCTOU path replacement.
+- if file path is outside policy or symlink-resolved path escapes allowlist, returns `path_not_allowed`.
+- `action` defaults to `validate`; `read` returns file bytes in `blob`.
+- output fields:
+  - `session_id`
+  - `file_path`
+  - `mime_type`
+  - `size_bytes`
+  - `blob` (read only)
+- MIME detection order: file extension first, then content sniff, fallback `application/octet-stream`.
 
 Defaults:
 - Console target: `127.0.0.1:50051`
@@ -70,6 +88,7 @@ Config env:
 - `WORKER_COMPUTER_USE_OUTPUT_LIMIT_BYTES`
 - `WORKER_COMPUTER_USE_COMMAND_WHITELIST_MODE`
 - `WORKER_COMPUTER_USE_COMMAND_WHITELIST`
+- `WORKER_READ_IMAGE_ALLOWED_PATHS`
 
 Startup examples:
 

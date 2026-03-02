@@ -240,7 +240,12 @@ func handleMCPReadImageTool(ctx context.Context, dispatcher CommandDispatcher, i
 	}
 
 	timeout := time.Duration(timeoutMS) * time.Millisecond
-	validated, err := callTerminalResource(ctx, dispatcher, mcpTerminalResourcePayload{
+	resourceCapability := terminalResourceCapabilityName
+	if sessionID == computerUseSessionID {
+		resourceCapability = readImageCapabilityName
+	}
+
+	validated, err := callResourceCapability(ctx, dispatcher, resourceCapability, mcpTerminalResourcePayload{
 		SessionID: sessionID,
 		FilePath:  filePath,
 		Action:    "validate",
@@ -260,7 +265,7 @@ func handleMCPReadImageTool(ctx context.Context, dispatcher CommandDispatcher, i
 		}, nil, nil
 	}
 
-	readResult, err := callTerminalResource(ctx, dispatcher, mcpTerminalResourcePayload{
+	readResult, err := callResourceCapability(ctx, dispatcher, resourceCapability, mcpTerminalResourcePayload{
 		SessionID: sessionID,
 		FilePath:  filePath,
 		Action:    "read",

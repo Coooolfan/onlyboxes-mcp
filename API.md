@@ -844,6 +844,8 @@ Input:
 - `session_id` required
 - `file_path` required
 - `timeout_ms` optional, `1..600000`, default `60000`
+- when `session_id` is exactly `computerUse`, routing uses caller-owned `worker-sys` `readImage` capability
+- for other `session_id` values, routing uses `terminalResource` capability
 
 Behavior:
 
@@ -900,6 +902,7 @@ Console responds with:
 - Console gRPC has no built-in TLS/mTLS in this release.
 - `worker-docker` rejects insecure console endpoints by default, and allows plaintext only when `WORKER_CONSOLE_INSECURE=true`.
 - `worker-sys` executes `computerUse` directly on host shell (`/bin/sh -lc`) without container isolation.
+- `worker-sys` `readImage` reads host files directly and accepts only `session_id=computerUse`.
 - deploy `worker-sys` only on dedicated hosts with strict OS-level access controls.
 - Put console HTTP (`:8089`) and gRPC (`:50051`) behind a reverse proxy/gateway and enforce TLS for external access.
 - Keep gRPC endpoint private and tunnel/encrypt traffic in production.

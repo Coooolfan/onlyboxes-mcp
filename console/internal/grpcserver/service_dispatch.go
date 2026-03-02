@@ -340,7 +340,8 @@ func (s *RegistryService) pickSessionForCapability(capability string, ownerID st
 func (s *RegistryService) listOnlineNodeIDsForCapability(capability string, ownerID string) []string {
 	now := s.nowFn()
 	offlineTTL := time.Duration(s.offlineTTLSec) * time.Second
-	if normalizeCapability(capability) == computerUseCapabilityName {
+	normalizedCapability := normalizeCapability(capability)
+	if normalizedCapability == computerUseCapabilityName || normalizedCapability == readImageCapabilityName {
 		normalizedOwnerID := normalizeTaskOwnerID(ownerID)
 		if normalizedOwnerID == "" {
 			return []string{}
@@ -348,12 +349,12 @@ func (s *RegistryService) listOnlineNodeIDsForCapability(capability string, owne
 		return s.store.ListOnlineNodeIDsByOwnerTypeAndCapability(
 			normalizedOwnerID,
 			registry.WorkerTypeSys,
-			capability,
+			normalizedCapability,
 			now,
 			offlineTTL,
 		)
 	}
-	return s.store.ListOnlineNodeIDsByCapability(capability, now, offlineTTL)
+	return s.store.ListOnlineNodeIDsByCapability(normalizedCapability, now, offlineTTL)
 }
 
 func normalizeCapability(capability string) string {

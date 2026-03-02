@@ -18,7 +18,10 @@ const (
 	maxReconnectDelay                = 15 * time.Second
 	computerUseCapabilityName        = "computeruse"
 	computerUseCapabilityDeclared    = "computerUse"
+	readImageCapabilityName          = "readimage"
+	readImageCapabilityDeclared      = "readImage"
 	computerUseCapabilityMaxInflight = 1
+	readImageCapabilityMaxInflight   = 1
 )
 
 var waitReconnect = waitReconnectDelay
@@ -39,13 +42,20 @@ func Run(ctx context.Context, cfg config.Config) error {
 	})
 	originalRunComputerUse := runComputerUse
 	runComputerUse = executor.Execute
+	originalRunReadImage := runReadImage
+	runReadImage = newReadImageExecutor(cfg.ReadImageAllowedPaths).Execute
 	defer func() {
 		runComputerUse = originalRunComputerUse
+		runReadImage = originalRunReadImage
 	}()
 	logging.Infof(
 		"computerUse whitelist configured: mode=%s count=%d",
 		cfg.ComputerUseWhitelistMode,
 		len(cfg.ComputerUseWhitelist),
+	)
+	logging.Infof(
+		"readImage allowed paths configured: count=%d",
+		len(cfg.ReadImageAllowedPaths),
 	)
 
 	reconnectDelay := initialReconnectDelay

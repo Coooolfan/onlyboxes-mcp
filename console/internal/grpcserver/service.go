@@ -28,6 +28,8 @@ const (
 	terminalRoutePruneMinInterval = 1 * time.Minute
 	computerUseCapabilityName     = "computeruse"
 	computerUseCapabilityDeclared = "computerUse"
+	readImageCapabilityName       = "readimage"
+	readImageCapabilityDeclared   = "readImage"
 )
 
 var ErrNoEchoWorker = errors.New("no online worker supports echo")

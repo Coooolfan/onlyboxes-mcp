@@ -139,16 +139,23 @@ func (s *RegistryService) resolveHelloByWorkerType(hello *registryv1.ConnectHell
 		return hello, nil
 	}
 
+	hasComputerUse := false
+	hasReadImage := false
 	for _, capability := range hello.GetCapabilities() {
 		if capability == nil {
 			continue
 		}
-		if normalizeCapability(capability.GetName()) != computerUseCapabilityName {
-			return nil, status.Error(codes.PermissionDenied, "worker-sys supports only computerUse capability")
+		switch normalizeCapability(capability.GetName()) {
+		case computerUseCapabilityName:
+			hasComputerUse = true
+		case readImageCapabilityName:
+			hasReadImage = true
+		default:
+			return nil, status.Error(codes.PermissionDenied, "worker-sys supports only computerUse and readImage capabilities")
 		}
 	}
-	if len(hello.GetCapabilities()) == 0 {
-		return nil, status.Error(codes.PermissionDenied, "worker-sys supports only computerUse capability")
+	if !hasComputerUse || !hasReadImage {
+		return nil, status.Error(codes.PermissionDenied, "worker-sys requires computerUse and readImage capabilities")
 	}
 
 	labels := cloneLabels(hello.GetLabels())
@@ -162,6 +169,10 @@ func (s *RegistryService) resolveHelloByWorkerType(hello *registryv1.ConnectHell
 		Capabilities: []*registryv1.CapabilityDeclaration{
 			{
 				Name:        computerUseCapabilityDeclared,
+				MaxInflight: 1,
+			},
+			{
+				Name:        readImageCapabilityDeclared,
 				MaxInflight: 1,
 			},
 		},

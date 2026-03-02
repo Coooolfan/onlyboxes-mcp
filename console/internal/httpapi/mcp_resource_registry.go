@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -30,8 +31,22 @@ func callTerminalResource(
 	payload mcpTerminalResourcePayload,
 	timeout time.Duration,
 ) (mcpTerminalResourceResult, error) {
+	return callResourceCapability(ctx, dispatcher, terminalResourceCapabilityName, payload, timeout)
+}
+
+func callResourceCapability(
+	ctx context.Context,
+	dispatcher CommandDispatcher,
+	capability string,
+	payload mcpTerminalResourcePayload,
+	timeout time.Duration,
+) (mcpTerminalResourceResult, error) {
 	if dispatcher == nil {
 		return mcpTerminalResourceResult{}, errors.New("task dispatcher is unavailable")
+	}
+	capabilityName := strings.TrimSpace(capability)
+	if capabilityName == "" {
+		return mcpTerminalResourceResult{}, errors.New("resource capability is required")
 	}
 
 	timeoutValue := timeout
@@ -45,11 +60,11 @@ func callTerminalResource(
 
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		return mcpTerminalResourceResult{}, errors.New("failed to encode terminalResource payload")
+		return mcpTerminalResourceResult{}, fmt.Errorf("failed to encode %s payload", capabilityName)
 	}
 
 	submitResult, err := dispatcher.SubmitTask(ctx, grpcserver.SubmitTaskRequest{
-		Capability: terminalResourceCapabilityName,
+		Capability: capabilityName,
 		InputJSON:  payloadJSON,
 		Mode:       grpcserver.TaskModeSync,
 		Timeout:    timeoutValue,
@@ -59,7 +74,7 @@ func callTerminalResource(
 		return mcpTerminalResourceResult{}, mapMCPToolTaskSubmitError(err)
 	}
 	if !submitResult.Completed {
-		return mcpTerminalResourceResult{}, errors.New("terminalResource task did not complete")
+		return mcpTerminalResourceResult{}, fmt.Errorf("%s task did not complete", capabilityName)
 	}
 
 	task := submitResult.Task
@@ -67,7 +82,7 @@ func callTerminalResource(
 	case grpcserver.TaskStatusSucceeded:
 		decoded := mcpTerminalResourceResult{}
 		if err := json.Unmarshal(task.ResultJSON, &decoded); err != nil {
-			return mcpTerminalResourceResult{}, errors.New("invalid terminalResource result payload")
+			return mcpTerminalResourceResult{}, fmt.Errorf("invalid %s result payload", capabilityName)
 		}
 		return decoded, nil
 	case grpcserver.TaskStatusTimeout:

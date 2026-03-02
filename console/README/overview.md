@@ -22,8 +22,8 @@ The console service hosts:
     - non-admin: list/stats/inflight only own `worker-sys`; can create/delete only own `worker-sys`
   - `worker-sys` constraints:
     - max one per account
-    - only `computerUse` capability is accepted
-    - `computerUse.max_inflight` is forced to `1`
+    - only `computerUse` and `readImage` capabilities are accepted
+    - `computerUse.max_inflight` and `readImage.max_inflight` are both forced to `1`
 - command APIs (execution, token whitelist required):
   - `POST /api/v1/commands/echo` for blocking echo command execution.
   - `POST /api/v1/commands/terminal` for blocking terminal command execution over `terminalExec` capability.
@@ -74,7 +74,10 @@ The console service hosts:
     - `readImage`
       - input: `{"session_id":"required","file_path":"required","timeout_ms":60000}`
       - `session_id` and `file_path` are required (whitespace-only is rejected).
-      - validates file existence via worker `terminalResource` capability; directories are rejected.
+      - `session_id=="computerUse"` routes to caller-owned `worker-sys` via `readImage` capability.
+      - other `session_id` values route via worker `terminalResource` capability.
+      - `worker-sys` accepts only `session_id=="computerUse"` for this capability.
+      - validates file existence; directories are rejected.
       - output is content-only (no structured output fields).
       - image files (`image/*`) return exactly one `image` content item.
       - non-image files return exactly one `text` content item:

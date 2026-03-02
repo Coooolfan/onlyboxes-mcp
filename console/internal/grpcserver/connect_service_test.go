@@ -284,7 +284,7 @@ func TestConnectAcceptsHelloWithoutLegacyAuthFields(t *testing.T) {
 	_ = stream.CloseSend()
 }
 
-func TestConnectRejectsWorkerSysNonComputerUseCapability(t *testing.T) {
+func TestConnectRejectsWorkerSysNonAllowedCapability(t *testing.T) {
 	store := registrytest.NewStore(t)
 	now := time.Unix(1_700_000_010, 0)
 	seeded := store.SeedProvisionedWorkers([]registry.ProvisionedWorker{
@@ -310,7 +310,33 @@ func TestConnectRejectsWorkerSysNonComputerUseCapability(t *testing.T) {
 	}
 }
 
-func TestConnectWorkerSysForcesComputerUseMaxInflightOne(t *testing.T) {
+func TestConnectRejectsWorkerSysMissingReadImageCapability(t *testing.T) {
+	store := registrytest.NewStore(t)
+	now := time.Unix(1_700_000_015, 0)
+	seeded := store.SeedProvisionedWorkers([]registry.ProvisionedWorker{
+		{
+			NodeID: "node-sys",
+			Labels: map[string]string{
+				registry.LabelOwnerIDKey:    "owner-a",
+				registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+			},
+		},
+	}, now, 15*time.Second)
+	if seeded != 1 {
+		t.Fatalf("expected one seeded worker, got %d", seeded)
+	}
+
+	svc := NewRegistryService(store, map[string]string{"node-sys": "secret-sys"}, 5, 15, 60*time.Second)
+	client, cleanup := newBufClient(t, svc)
+	defer cleanup()
+
+	_, _, err := connectWorker(client, "node-sys", "secret-sys", "nonce-sys-missing-read-image", []string{computerUseCapabilityDeclared})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expected PermissionDenied, got %v", err)
+	}
+}
+
+func TestConnectWorkerSysForcesRequiredCapabilitiesMaxInflightOne(t *testing.T) {
 	store := registrytest.NewStore(t)
 	now := time.Unix(1_700_000_020, 0)
 	seeded := store.SeedProvisionedWorkers([]registry.ProvisionedWorker{
@@ -330,7 +356,13 @@ func TestConnectWorkerSysForcesComputerUseMaxInflightOne(t *testing.T) {
 	client, cleanup := newBufClient(t, svc)
 	defer cleanup()
 
-	stream, _, err := connectWorker(client, "node-sys", "secret-sys", "nonce-sys-computer-use", []string{computerUseCapabilityDeclared})
+	stream, _, err := connectWorker(
+		client,
+		"node-sys",
+		"secret-sys",
+		"nonce-sys-required-capabilities",
+		[]string{computerUseCapabilityDeclared, readImageCapabilityDeclared},
+	)
 	if err != nil {
 		t.Fatalf("connect worker failed: %v", err)
 	}
@@ -345,7 +377,14 @@ func TestConnectWorkerSysForcesComputerUseMaxInflightOne(t *testing.T) {
 		t.Fatalf("expected computerUse capability to be present")
 	}
 	if maxInflight != 1 {
-		t.Fatalf("expected max_inflight to be forced to 1, got %d", maxInflight)
+		t.Fatalf("expected computerUse max_inflight to be forced to 1, got %d", maxInflight)
+	}
+	_, maxInflight, ok = session.inflightSnapshot(readImageCapabilityName)
+	if !ok {
+		t.Fatalf("expected readImage capability to be present")
+	}
+	if maxInflight != 1 {
+		t.Fatalf("expected readImage max_inflight to be forced to 1, got %d", maxInflight)
 	}
 }
 
@@ -581,12 +620,12 @@ func TestSubmitTaskComputerUseRoutesByOwnerAndCapacity(t *testing.T) {
 	client, cleanup := newBufClient(t, svc)
 	defer cleanup()
 
-	streamA, _, err := connectWorker(client, "node-owner-a", "secret-owner-a", "nonce-owner-a", []string{computerUseCapabilityDeclared})
+	streamA, _, err := connectWorker(client, "node-owner-a", "secret-owner-a", "nonce-owner-a", []string{computerUseCapabilityDeclared, readImageCapabilityDeclared})
 	if err != nil {
 		t.Fatalf("connect worker owner-a failed: %v", err)
 	}
 	defer streamA.CloseSend()
-	streamB, _, err := connectWorker(client, "node-owner-b", "secret-owner-b", "nonce-owner-b", []string{computerUseCapabilityDeclared})
+	streamB, _, err := connectWorker(client, "node-owner-b", "secret-owner-b", "nonce-owner-b", []string{computerUseCapabilityDeclared, readImageCapabilityDeclared})
 	if err != nil {
 		t.Fatalf("connect worker owner-b failed: %v", err)
 	}
@@ -630,6 +669,94 @@ func TestSubmitTaskComputerUseRoutesByOwnerAndCapacity(t *testing.T) {
 	})
 	if !errors.Is(err, ErrNoWorkerCapacity) {
 		t.Fatalf("expected ErrNoWorkerCapacity for owner-a, got %v", err)
+	}
+}
+
+func TestSubmitTaskReadImageRoutesByOwnerAndCapacity(t *testing.T) {
+	store := registrytest.NewStore(t)
+	now := time.Unix(1_700_000_055, 0)
+	seeded := store.SeedProvisionedWorkers([]registry.ProvisionedWorker{
+		{
+			NodeID: "node-owner-a",
+			Labels: map[string]string{
+				registry.LabelOwnerIDKey:    "owner-a",
+				registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+			},
+		},
+		{
+			NodeID: "node-owner-b",
+			Labels: map[string]string{
+				registry.LabelOwnerIDKey:    "owner-b",
+				registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+			},
+		},
+	}, now, 15*time.Second)
+	if seeded != 2 {
+		t.Fatalf("expected two seeded workers, got %d", seeded)
+	}
+
+	svc := NewRegistryService(
+		store,
+		map[string]string{
+			"node-owner-a": "secret-owner-a",
+			"node-owner-b": "secret-owner-b",
+		},
+		5,
+		15,
+		60*time.Second,
+	)
+	client, cleanup := newBufClient(t, svc)
+	defer cleanup()
+
+	streamA, _, err := connectWorker(client, "node-owner-a", "secret-owner-a", "nonce-owner-a-read-image", []string{computerUseCapabilityDeclared, readImageCapabilityDeclared})
+	if err != nil {
+		t.Fatalf("connect worker owner-a failed: %v", err)
+	}
+	defer streamA.CloseSend()
+	streamB, _, err := connectWorker(client, "node-owner-b", "secret-owner-b", "nonce-owner-b-read-image", []string{computerUseCapabilityDeclared, readImageCapabilityDeclared})
+	if err != nil {
+		t.Fatalf("connect worker owner-b failed: %v", err)
+	}
+	defer streamB.CloseSend()
+
+	go readImageResponder(streamA, "owner-a")
+	go readImageResponder(streamB, "owner-b")
+
+	resultB, err := svc.SubmitTask(context.Background(), SubmitTaskRequest{
+		Capability: "readImage",
+		InputJSON:  []byte(`{"session_id":"computerUse","file_path":"/workspace/image.png","action":"validate"}`),
+		Mode:       TaskModeSync,
+		Timeout:    2 * time.Second,
+		OwnerID:    "owner-b",
+	})
+	if err != nil {
+		t.Fatalf("submit owner-b readImage task failed: %v", err)
+	}
+	if !resultB.Completed || resultB.Task.Status != TaskStatusSucceeded {
+		t.Fatalf("expected owner-b readImage task succeeded, got completed=%v status=%s", resultB.Completed, resultB.Task.Status)
+	}
+	if !strings.Contains(string(resultB.Task.ResultJSON), "owner-b") {
+		t.Fatalf("expected owner-b readImage worker result, got %s", string(resultB.Task.ResultJSON))
+	}
+
+	sessionA := svc.getSession("node-owner-a")
+	if sessionA == nil {
+		t.Fatalf("expected active session for owner-a worker")
+	}
+	if !sessionA.tryAcquireCapability(readImageCapabilityName) {
+		t.Fatalf("expected to acquire owner-a readImage slot")
+	}
+	defer sessionA.releaseCapability(readImageCapabilityName)
+
+	_, err = svc.SubmitTask(context.Background(), SubmitTaskRequest{
+		Capability: "readImage",
+		InputJSON:  []byte(`{"session_id":"computerUse","file_path":"/workspace/image.png","action":"validate"}`),
+		Mode:       TaskModeSync,
+		Timeout:    500 * time.Millisecond,
+		OwnerID:    "owner-a",
+	})
+	if !errors.Is(err, ErrNoWorkerCapacity) {
+		t.Fatalf("expected ErrNoWorkerCapacity for owner-a readImage, got %v", err)
 	}
 }
 
@@ -1807,6 +1934,66 @@ func computerUseResponder(stream grpc.BidiStreamingClient[registryv1.ConnectRequ
 			"stderr_truncated":      false,
 			"lease_expires_unix_ms": time.Now().Add(time.Minute).UnixMilli(),
 		})
+		_ = stream.Send(&registryv1.ConnectRequest{
+			Payload: &registryv1.ConnectRequest_CommandResult{
+				CommandResult: &registryv1.CommandResult{
+					CommandId:       dispatch.GetCommandId(),
+					PayloadJson:     payloadJSON,
+					CompletedUnixMs: time.Now().UnixMilli(),
+				},
+			},
+		})
+	}
+}
+
+func readImageResponder(stream grpc.BidiStreamingClient[registryv1.ConnectRequest, registryv1.ConnectResponse], marker string) {
+	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			return
+		}
+		dispatch := resp.GetCommandDispatch()
+		if dispatch == nil {
+			continue
+		}
+		if normalizeCapability(dispatch.GetCapability()) != readImageCapabilityName {
+			continue
+		}
+
+		payload := terminalResourceScopedPayload{}
+		if err := json.Unmarshal(dispatch.GetPayloadJson(), &payload); err != nil {
+			sendTerminalExecError(stream, dispatch.GetCommandId(), "invalid_payload", "invalid readImage payload")
+			continue
+		}
+		if strings.TrimSpace(payload.SessionID) != "computerUse" {
+			sendTerminalExecError(stream, dispatch.GetCommandId(), terminalSessionNotFoundCode, "session not found")
+			continue
+		}
+		filePath := strings.TrimSpace(payload.FilePath)
+		if filePath == "" {
+			sendTerminalExecError(stream, dispatch.GetCommandId(), "invalid_payload", "session_id and file_path are required")
+			continue
+		}
+		action := strings.TrimSpace(strings.ToLower(payload.Action))
+		if action == "" {
+			action = "validate"
+		}
+		if action != "validate" && action != "read" {
+			sendTerminalExecError(stream, dispatch.GetCommandId(), "invalid_payload", "action must be validate or read")
+			continue
+		}
+
+		result := map[string]any{
+			"session_id": "computerUse",
+			"file_path":  filePath,
+			"mime_type":  "image/png",
+			"size_bytes": len(marker),
+			"worker":     marker,
+		}
+		if action == "read" {
+			result["blob"] = []byte(marker)
+		}
+		payloadJSON, _ := json.Marshal(result)
 		_ = stream.Send(&registryv1.ConnectRequest{
 			Payload: &registryv1.ConnectRequest_CommandResult{
 				CommandResult: &registryv1.CommandResult{

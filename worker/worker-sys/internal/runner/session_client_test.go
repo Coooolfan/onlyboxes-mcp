@@ -150,7 +150,7 @@ func TestHandleCommandDispatchRunsExecutionAndReleasesSlot(t *testing.T) {
 	}
 }
 
-func TestCommandDispatchTextForLogComputerUsePayload(t *testing.T) {
+func TestCommandDispatchTextForLogPayloads(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -182,6 +182,24 @@ func TestCommandDispatchTextForLogComputerUsePayload(t *testing.T) {
 			capability: computerUseCapabilityName,
 			payload:    []byte(`{"command":"   "}`),
 			want:       `{"command":"   "}`,
+		},
+		{
+			name:       "read_image_payload_logs_action_and_path",
+			capability: readImageCapabilityName,
+			payload:    []byte(`{"session_id":"computerUse","file_path":"/tmp/a.png","action":"read"}`),
+			want:       "read /tmp/a.png",
+		},
+		{
+			name:       "read_image_invalid_action_logs_path",
+			capability: readImageCapabilityName,
+			payload:    []byte(`{"session_id":"computerUse","file_path":"/tmp/a.png","action":"invalid"}`),
+			want:       "/tmp/a.png",
+		},
+		{
+			name:       "read_image_empty_path_falls_back_to_raw",
+			capability: readImageCapabilityName,
+			payload:    []byte(`{"session_id":"computerUse","file_path":"   ","action":"read"}`),
+			want:       `{"session_id":"computerUse","file_path":"   ","action":"read"}`,
 		},
 		{
 			name:       "unsupported_capability_uses_raw_payload",

@@ -570,6 +570,130 @@ func TestMCPToolCallReadImageSuccess(t *testing.T) {
 	}
 }
 
+func TestMCPToolCallReadImageComputerUseSessionRoutesToReadImageCapability(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	actions := make([]string, 0, 2)
+	router := newMCPTestRouter(t, &fakeMCPDispatcher{
+		submitTask: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
+			if req.Capability != readImageCapabilityName {
+				t.Fatalf("expected capability=%q, got %q", readImageCapabilityName, req.Capability)
+			}
+			if req.OwnerID != testDashboardAccountID {
+				t.Fatalf("expected owner_id from token, got %q", req.OwnerID)
+			}
+			payload := mcpTerminalResourcePayload{}
+			if err := json.Unmarshal(req.InputJSON, &payload); err != nil {
+				t.Fatalf("expected valid readImage payload, got %s", string(req.InputJSON))
+			}
+			actions = append(actions, payload.Action)
+			switch payload.Action {
+			case "validate":
+				resultJSON, _ := json.Marshal(mcpTerminalResourceResult{
+					SessionID: payload.SessionID,
+					FilePath:  payload.FilePath,
+					MIMEType:  "image/png",
+					SizeBytes: 4,
+				})
+				return grpcserver.SubmitTaskResult{
+					Task: grpcserver.TaskSnapshot{
+						TaskID:     "task-read-image-sys-validate",
+						Capability: readImageCapabilityName,
+						Status:     grpcserver.TaskStatusSucceeded,
+						ResultJSON: resultJSON,
+						CreatedAt:  now,
+						UpdatedAt:  now,
+						DeadlineAt: now.Add(60 * time.Second),
+					},
+					Completed: true,
+				}, nil
+			case "read":
+				resultJSON, _ := json.Marshal(mcpTerminalResourceResult{
+					SessionID: payload.SessionID,
+					FilePath:  payload.FilePath,
+					MIMEType:  "image/png",
+					SizeBytes: 4,
+					Blob:      []byte{0x89, 0x50, 0x4e, 0x47},
+				})
+				return grpcserver.SubmitTaskResult{
+					Task: grpcserver.TaskSnapshot{
+						TaskID:     "task-read-image-sys-read",
+						Capability: readImageCapabilityName,
+						Status:     grpcserver.TaskStatusSucceeded,
+						ResultJSON: resultJSON,
+						CreatedAt:  now,
+						UpdatedAt:  now,
+						DeadlineAt: now.Add(60 * time.Second),
+					},
+					Completed: true,
+				}, nil
+			default:
+				t.Fatalf("unexpected action: %q", payload.Action)
+				return grpcserver.SubmitTaskResult{}, nil
+			}
+		},
+	})
+
+	payload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"computerUse","file_path":"/workspace/image.png"}}}`)
+	result := mustMapField(t, payload, "result")
+	if asBool(result["isError"]) {
+		t.Fatalf("expected tool call success, got error payload=%s", mustJSON(t, result))
+	}
+	contentRaw, ok := result["content"].([]any)
+	if !ok || len(contentRaw) != 1 {
+		t.Fatalf("expected [image] content, got %s", mustJSON(t, result))
+	}
+	first := mustObject(t, contentRaw[0], "readImage.content[0]")
+	if got := asString(t, first["type"]); got != "image" {
+		t.Fatalf("expected content type image, got %q", got)
+	}
+	if got := asString(t, first["mimeType"]); got != "image/png" {
+		t.Fatalf("expected image mimeType=image/png, got %q", got)
+	}
+	if len(actions) != 2 || actions[0] != "validate" || actions[1] != "read" {
+		t.Fatalf("expected validate/read actions, got %#v", actions)
+	}
+}
+
+func TestMCPToolCallReadImageComputerUseSessionIsCaseSensitive(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	router := newMCPTestRouter(t, &fakeMCPDispatcher{
+		submitTask: func(ctx context.Context, req grpcserver.SubmitTaskRequest) (grpcserver.SubmitTaskResult, error) {
+			if req.Capability != terminalResourceCapabilityName {
+				t.Fatalf("expected capability=%q for lowercase session_id, got %q", terminalResourceCapabilityName, req.Capability)
+			}
+			payload := mcpTerminalResourcePayload{}
+			if err := json.Unmarshal(req.InputJSON, &payload); err != nil {
+				t.Fatalf("expected valid terminalResource payload, got %s", string(req.InputJSON))
+			}
+			resultJSON, _ := json.Marshal(mcpTerminalResourceResult{
+				SessionID: payload.SessionID,
+				FilePath:  payload.FilePath,
+				MIMEType:  "image/png",
+				SizeBytes: 4,
+				Blob:      []byte{0x89, 0x50, 0x4e, 0x47},
+			})
+			return grpcserver.SubmitTaskResult{
+				Task: grpcserver.TaskSnapshot{
+					TaskID:     "task-read-image-lowercase",
+					Capability: terminalResourceCapabilityName,
+					Status:     grpcserver.TaskStatusSucceeded,
+					ResultJSON: resultJSON,
+					CreatedAt:  now,
+					UpdatedAt:  now,
+					DeadlineAt: now.Add(60 * time.Second),
+				},
+				Completed: true,
+			}, nil
+		},
+	})
+
+	payload := mcpPostJSON(t, router, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"readImage","arguments":{"session_id":"computeruse","file_path":"/workspace/image.png"}}}`)
+	result := mustMapField(t, payload, "result")
+	if asBool(result["isError"]) {
+		t.Fatalf("expected tool call success, got error payload=%s", mustJSON(t, result))
+	}
+}
+
 func TestMCPToolCallReadImageUnsupportedMIME(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	readCalled := false

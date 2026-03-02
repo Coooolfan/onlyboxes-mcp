@@ -180,6 +180,20 @@ func commandDispatchTextForLog(capability string, payload []byte) string {
 			return rawPayload
 		}
 		return command
+	case readImageCapabilityName:
+		decoded := readImagePayload{}
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			return rawPayload
+		}
+		filePath := strings.TrimSpace(decoded.FilePath)
+		if filePath == "" {
+			return rawPayload
+		}
+		action := normalizeReadImageAction(decoded.Action)
+		if action == "" {
+			return filePath
+		}
+		return action + " " + filePath
 	default:
 		return rawPayload
 	}

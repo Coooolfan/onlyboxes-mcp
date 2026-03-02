@@ -36,6 +36,7 @@ type Config struct {
 	ComputerUseOutputLimitByte int
 	ComputerUseWhitelistMode   string
 	ComputerUseWhitelist       []string
+	ReadImageAllowedPaths      []string
 }
 
 func Load() Config {
@@ -45,6 +46,7 @@ func Load() Config {
 	outputLimit := parsePositiveIntEnv("WORKER_COMPUTER_USE_OUTPUT_LIMIT_BYTES", defaultComputerUseOutputMaxByte)
 	whitelistMode := parseComputerUseWhitelistMode(os.Getenv("WORKER_COMPUTER_USE_COMMAND_WHITELIST_MODE"))
 	whitelist := parseComputerUseWhitelist(os.Getenv("WORKER_COMPUTER_USE_COMMAND_WHITELIST"))
+	readImageAllowedPaths := parseReadImageAllowedPaths(os.Getenv("WORKER_READ_IMAGE_ALLOWED_PATHS"))
 
 	defaultVersion := strings.TrimSpace(buildinfo.Version)
 	if defaultVersion == "" {
@@ -66,6 +68,7 @@ func Load() Config {
 		ComputerUseOutputLimitByte: outputLimit,
 		ComputerUseWhitelistMode:   whitelistMode,
 		ComputerUseWhitelist:       whitelist,
+		ReadImageAllowedPaths:      readImageAllowedPaths,
 	}
 }
 
@@ -145,6 +148,33 @@ func parseComputerUseWhitelistMode(raw string) string {
 }
 
 func parseComputerUseWhitelist(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return []string{}
+	}
+
+	decoded := []string{}
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return []string{}
+	}
+
+	result := make([]string, 0, len(decoded))
+	seen := make(map[string]struct{}, len(decoded))
+	for _, entry := range decoded {
+		value := strings.TrimSpace(entry)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+
+	return result
+}
+
+func parseReadImageAllowedPaths(raw string) []string {
 	if strings.TrimSpace(raw) == "" {
 		return []string{}
 	}

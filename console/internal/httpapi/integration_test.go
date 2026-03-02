@@ -1554,6 +1554,269 @@ func TestTokenIsolationLifecycle(t *testing.T) {
 	}
 }
 
+func TestReadImageComputerUseRoutesByOwner(t *testing.T) {
+	store := registrytest.NewStore(t)
+	const workerAID = "node-sys-owner-a"
+	const workerASecret = "secret-sys-owner-a"
+	const workerBID = "node-sys-owner-b"
+	const workerBSecret = "secret-sys-owner-b"
+	const secondAccountID = "acc-test-member"
+	const thirdAccountID = "acc-test-no-worker"
+	tokenA := testMCPToken
+	tokenB := testMCPTokenB
+	tokenC := "mcp-token-test-c"
+	tokenD := "mcp-token-test-d"
+
+	now := time.Unix(1_700_008_000, 0)
+	seeded := store.SeedProvisionedWorkers([]registry.ProvisionedWorker{
+		{
+			NodeID: workerAID,
+			Labels: map[string]string{
+				registry.LabelOwnerIDKey:    testDashboardAccountID,
+				registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+			},
+		},
+		{
+			NodeID: workerBID,
+			Labels: map[string]string{
+				registry.LabelOwnerIDKey:    secondAccountID,
+				registry.LabelWorkerTypeKey: registry.WorkerTypeSys,
+			},
+		},
+	}, now, 15*time.Second)
+	if seeded != 2 {
+		t.Fatalf("expected two seeded worker-sys nodes, got %d", seeded)
+	}
+
+	registrySvc := grpcserver.NewRegistryService(
+		store,
+		map[string]string{
+			workerAID: workerASecret,
+			workerBID: workerBSecret,
+		},
+		5,
+		15,
+		60*time.Second,
+	)
+	grpcSrv := grpcserver.NewServer(registrySvc)
+	grpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to open grpc listener: %v", err)
+	}
+	defer grpcListener.Close()
+	go func() {
+		_ = grpcSrv.Serve(grpcListener)
+	}()
+	defer grpcSrv.Stop()
+
+	handler := NewWorkerHandler(store, 15*time.Second, registrySvc, registrySvc, registrySvc, ":50051")
+	mcpAuth := newBareTestMCPAuth()
+	if _, _, err := mcpAuth.createToken(context.Background(), testDashboardAccountID, "token-a", &tokenA); err != nil {
+		t.Fatalf("seed token-a failed: %v", err)
+	}
+	if _, _, err := mcpAuth.createToken(context.Background(), testDashboardAccountID, "token-b", &tokenB); err != nil {
+		t.Fatalf("seed token-b failed: %v", err)
+	}
+	seedTestAccount(mcpAuth.queries, secondAccountID, "member-test", "member-pass", false)
+	if _, _, err := mcpAuth.createToken(context.Background(), secondAccountID, "token-c", &tokenC); err != nil {
+		t.Fatalf("seed token-c failed: %v", err)
+	}
+	seedTestAccount(mcpAuth.queries, thirdAccountID, "no-worker-test", "no-worker-pass", false)
+	if _, _, err := mcpAuth.createToken(context.Background(), thirdAccountID, "token-d", &tokenD); err != nil {
+		t.Fatalf("seed token-d failed: %v", err)
+	}
+	router := NewRouter(handler, newTestConsoleAuth(t), mcpAuth)
+	httpSrv := httptest.NewServer(router)
+	defer httpSrv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := grpc.NewClient(grpcListener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to dial grpc: %v", err)
+	}
+	defer conn.Close()
+	client := registryv1.NewWorkerRegistryServiceClient(conn)
+
+	startWorker := func(workerID string, workerSecret string, marker string) grpc.BidiStreamingClient[registryv1.ConnectRequest, registryv1.ConnectResponse] {
+		stream, connectErr := client.Connect(ctx)
+		if connectErr != nil {
+			t.Fatalf("connect worker %s failed: %v", workerID, connectErr)
+		}
+		hello := &registryv1.ConnectHello{
+			NodeId:       workerID,
+			NodeName:     workerID,
+			ExecutorKind: "sys",
+			Capabilities: []*registryv1.CapabilityDeclaration{
+				{Name: computerUseCapabilityName, MaxInflight: 1},
+				{Name: readImageCapabilityName, MaxInflight: 1},
+			},
+			Version:      "v0.1.0",
+			WorkerSecret: workerSecret,
+		}
+		if err := stream.Send(&registryv1.ConnectRequest{
+			Payload: &registryv1.ConnectRequest_Hello{Hello: hello},
+		}); err != nil {
+			t.Fatalf("send hello for %s failed: %v", workerID, err)
+		}
+		resp, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("recv connect ack for %s failed: %v", workerID, err)
+		}
+		if resp.GetConnectAck() == nil {
+			t.Fatalf("expected connect_ack for %s, got %#v", workerID, resp.GetPayload())
+		}
+
+		go func() {
+			for {
+				dispatchResp, recvErr := stream.Recv()
+				if recvErr != nil {
+					return
+				}
+				dispatch := dispatchResp.GetCommandDispatch()
+				if dispatch == nil {
+					continue
+				}
+				if strings.TrimSpace(strings.ToLower(dispatch.GetCapability())) != "readimage" {
+					continue
+				}
+				payload := mcpTerminalResourcePayload{}
+				if err := json.Unmarshal(dispatch.GetPayloadJson(), &payload); err != nil {
+					_ = stream.Send(&registryv1.ConnectRequest{
+						Payload: &registryv1.ConnectRequest_CommandResult{
+							CommandResult: &registryv1.CommandResult{
+								CommandId: dispatch.GetCommandId(),
+								Error: &registryv1.CommandError{
+									Code:    terminalExecInvalidPayloadCode,
+									Message: "invalid payload",
+								},
+								CompletedUnixMs: time.Now().UnixMilli(),
+							},
+						},
+					})
+					continue
+				}
+				if payload.SessionID != "computerUse" {
+					_ = stream.Send(&registryv1.ConnectRequest{
+						Payload: &registryv1.ConnectRequest_CommandResult{
+							CommandResult: &registryv1.CommandResult{
+								CommandId: dispatch.GetCommandId(),
+								Error: &registryv1.CommandError{
+									Code:    terminalExecSessionNotFoundCode,
+									Message: "session not found",
+								},
+								CompletedUnixMs: time.Now().UnixMilli(),
+							},
+						},
+					})
+					continue
+				}
+				action := strings.TrimSpace(strings.ToLower(payload.Action))
+				if action == "" {
+					action = "validate"
+				}
+				result := mcpTerminalResourceResult{
+					SessionID: "computerUse",
+					FilePath:  payload.FilePath,
+					MIMEType:  "image/png",
+					SizeBytes: int64(len(marker)),
+				}
+				if action == "read" {
+					result.Blob = []byte(marker)
+				}
+				resultJSON, _ := json.Marshal(result)
+				_ = stream.Send(&registryv1.ConnectRequest{
+					Payload: &registryv1.ConnectRequest_CommandResult{
+						CommandResult: &registryv1.CommandResult{
+							CommandId:       dispatch.GetCommandId(),
+							PayloadJson:     resultJSON,
+							CompletedUnixMs: time.Now().UnixMilli(),
+						},
+					},
+				})
+			}
+		}()
+		return stream
+	}
+
+	streamA := startWorker(workerAID, workerASecret, "owner-a")
+	defer streamA.CloseSend()
+	streamB := startWorker(workerBID, workerBSecret, "owner-b")
+	defer streamB.CloseSend()
+
+	callReadImage := func(token string) *mcp.CallToolResult {
+		client := mcp.NewClient(&mcp.Implementation{
+			Name:    "mcp-read-image-computer-use-client",
+			Version: "v0.1.0",
+		}, nil)
+		session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+			Endpoint:             httpSrv.URL + "/mcp",
+			DisableStandaloneSSE: true,
+			HTTPClient:           newMCPTokenHTTPClient(token),
+		}, nil)
+		if err != nil {
+			t.Fatalf("connect mcp client for token %q failed: %v", token, err)
+		}
+		defer session.Close()
+
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name: "readImage",
+			Arguments: map[string]any{
+				"session_id": "computerUse",
+				"file_path":  "/workspace/image.png",
+			},
+		})
+		if err != nil {
+			t.Fatalf("mcp readImage computerUse call failed for token %q: %v", token, err)
+		}
+		return result
+	}
+
+	resultA := callReadImage(testMCPToken)
+	if resultA.IsError {
+		t.Fatalf("expected token A readImage computerUse success, got %q", firstTextContent(resultA))
+	}
+	imageA, ok := resultA.Content[0].(*mcp.ImageContent)
+	if !ok {
+		t.Fatalf("expected token A image content, got %T", resultA.Content[0])
+	}
+	if string(imageA.Data) != "owner-a" {
+		t.Fatalf("expected token A to route owner-a worker, got %q", string(imageA.Data))
+	}
+
+	resultB := callReadImage(testMCPTokenB)
+	if resultB.IsError {
+		t.Fatalf("expected token B readImage computerUse success, got %q", firstTextContent(resultB))
+	}
+	imageB, ok := resultB.Content[0].(*mcp.ImageContent)
+	if !ok {
+		t.Fatalf("expected token B image content, got %T", resultB.Content[0])
+	}
+	if string(imageB.Data) != "owner-a" {
+		t.Fatalf("expected token B to route owner-a worker, got %q", string(imageB.Data))
+	}
+
+	resultC := callReadImage(tokenC)
+	if resultC.IsError {
+		t.Fatalf("expected token C readImage computerUse success, got %q", firstTextContent(resultC))
+	}
+	imageC, ok := resultC.Content[0].(*mcp.ImageContent)
+	if !ok {
+		t.Fatalf("expected token C image content, got %T", resultC.Content[0])
+	}
+	if string(imageC.Data) != "owner-b" {
+		t.Fatalf("expected token C to route owner-b worker, got %q", string(imageC.Data))
+	}
+
+	resultD := callReadImage(tokenD)
+	if !resultD.IsError {
+		t.Fatalf("expected token D readImage computerUse to fail without owned worker-sys")
+	}
+	if got := firstTextContent(resultD); !strings.Contains(got, "no online worker supports requested capability") {
+		t.Fatalf("expected no_worker-style tool error for token D, got %q", got)
+	}
+}
+
 func readBody(t *testing.T, res *http.Response) string {
 	t.Helper()
 	if res == nil || res.Body == nil {

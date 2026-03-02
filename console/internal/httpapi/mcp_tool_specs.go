@@ -6,6 +6,8 @@ const (
 	terminalExecCapabilityName     = "terminalExec"
 	terminalResourceCapabilityName = "terminalResource"
 	computerUseCapabilityName      = "computerUse"
+	readImageCapabilityName        = "readImage"
+	computerUseSessionID           = "computerUse"
 	defaultMCPEchoTimeoutMS        = defaultEchoTimeoutMS
 	minMCPTaskTimeoutMS            = 1
 	defaultMCPTaskTimeoutMS        = defaultTaskTimeoutMS
@@ -92,7 +94,7 @@ var mcpTerminalExecToolDescription = "Executes shell commands in a persistent Do
 
 var mcpComputerUseToolDescription = "Executes shell commands directly on the caller-owned worker-sys host OS via /bin/sh -lc. Unlike terminalExec, this tool runs on the bare host without container isolation and is stateless — each invocation is independent with no session persistence. Only one command runs at a time (single concurrency). This tool is account-scoped and requires a user-created worker-sys. timeout_ms is a synchronous execution timeout in milliseconds (1-600000, default 60000). request_id provides idempotency for retries."
 
-var mcpReadImageToolDescription = "Reads a file from an existing terminal session and returns it as inline image content when mime type is image/*. For unsupported mime types, returns a text explanation."
+var mcpReadImageToolDescription = "Reads a file and returns it as inline image content when mime type is image/*. For unsupported mime types, returns a text explanation. When session_id is exactly \"computerUse\", routing uses the caller-owned worker-sys readImage capability; otherwise routing uses terminalResource for terminal sessions."
 
 var mcpEchoInputSchema = map[string]any{
 	"type":                 "object",
@@ -284,7 +286,7 @@ var mcpReadImageInputSchema = map[string]any{
 	"properties": map[string]any{
 		"session_id": map[string]any{
 			"type":        "string",
-			"description": "Terminal session identifier returned by terminalExec.",
+			"description": "Terminal session identifier returned by terminalExec. Use exact value \"computerUse\" to route to caller-owned worker-sys readImage capability.",
 		},
 		"file_path": map[string]any{
 			"type":        "string",

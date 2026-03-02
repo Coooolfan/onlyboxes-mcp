@@ -846,6 +846,8 @@ Task 所有权按账号隔离（由 token 对应账号决定）。
 - `session_id` 必填
 - `file_path` 必填
 - `timeout_ms` 可选，`1..600000`，默认 `60000`
+- 当 `session_id` 精确等于 `computerUse` 时，路由到调用账号自有 `worker-sys` 的 `readImage` capability
+- 其他 `session_id` 仍路由到 `terminalResource` capability
 
 行为：
 
@@ -902,6 +904,7 @@ Console 回包：
 - 当前版本 console gRPC 不提供内建 TLS/mTLS。
 - `worker-docker` 默认会拒绝不安全 console 端点，只有显式设置 `WORKER_CONSOLE_INSECURE=true` 才允许明文连接。
 - `worker-sys` 的 `computerUse` 在宿主机直接执行 `/bin/sh -lc`，不提供容器隔离。
+- `worker-sys` 的 `readImage` 直接读取宿主机文件，且仅接受 `session_id=computerUse`。
 - `worker-sys` 必须部署在独立主机并配合严格的操作系统权限控制。
 - 请将 console HTTP（`:8089`）和 gRPC（`:50051`）端点放在反向代理/网关之后，并对外访问强制 TLS。
 - 生产环境应将 gRPC 端口保持内网并通过隧道/链路加密。
