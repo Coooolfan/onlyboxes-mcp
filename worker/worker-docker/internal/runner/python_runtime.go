@@ -7,10 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/logging"
 )
 
 type pythonExecRunner struct {
@@ -211,11 +212,11 @@ func cleanupPythonExecContainer(containerName string) {
 
 	result := runDockerCommand(cleanupCtx, pythonExecDockerRemoveArgs(containerName)...)
 	if result.Err != nil {
-		log.Printf("pythonExec cleanup failed: container=%s err=%v", containerName, result.Err)
+		logging.Warnf("pythonExec cleanup failed: container=%s err=%v", containerName, result.Err)
 		return
 	}
 	if result.ExitCode != 0 && !isNoSuchContainerMessage(result.Stderr) {
-		log.Printf(
+		logging.Warnf(
 			"pythonExec cleanup failed: container=%s %s",
 			containerName,
 			dockerCommandFailureMessage("exit code", result.ExitCode, result.Stderr),

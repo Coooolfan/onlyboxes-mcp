@@ -4,15 +4,17 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
 	registryv1 "github.com/onlyboxes/onlyboxes/api/gen/go/registry/v1"
 	"github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/config"
+	"github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/logging"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -58,7 +60,7 @@ func runSession(ctx context.Context, cfg config.Config) error {
 	}
 
 	heartbeatInterval := durationFromServer(ack.GetHeartbeatIntervalSec(), cfg.HeartbeatInterval)
-	log.Printf("worker connected: node_id=%s node_name=%s session_id=%s", hello.GetNodeId(), hello.GetNodeName(), sessionID)
+	logging.Infof("worker connected: node_id=%s node_name=%s session_id=%s", hello.GetNodeId(), hello.GetNodeName(), sessionID)
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -68,7 +70,7 @@ func runSession(ctx context.Context, cfg config.Config) error {
 	sessionErrCh := make(chan error, 4)
 
 	go senderLoop(sessionCtx, stream, outbound, sessionErrCh)
-	go receiverLoop(sessionCtx, stream, outbound, heartbeatAckCh, sessionErrCh, cfg.WorkerID)
+	go receiverLoop(sessionCtx, stream, outbound, heartbeatAckCh, sessionErrCh)
 
 	return heartbeatLoop(sessionCtx, outbound, heartbeatAckCh, sessionErrCh, cfg, sessionID, heartbeatInterval)
 }
@@ -114,7 +116,6 @@ func receiverLoop(
 	outbound chan<- *registryv1.ConnectRequest,
 	heartbeatAckCh chan<- *registryv1.HeartbeatAck,
 	errCh chan<- error,
-	nodeID string,
 ) {
 	for {
 		resp, err := stream.Recv()
@@ -134,47 +135,8 @@ func receiverLoop(
 			dispatch := resp.GetCommandDispatch()
 			capability := strings.TrimSpace(strings.ToLower(dispatch.GetCapability()))
 			commandID := strings.TrimSpace(dispatch.GetCommandId())
-			switch {
-			case capability == echoCapabilityName:
-				log.Printf(
-					"command dispatch received: node_id=%s command_id=%s capability=%s payload_len=%d",
-					nodeID,
-					commandID,
-					capability,
-					len(dispatch.GetPayloadJson()),
-				)
-			case capability == pythonExecCapabilityName:
-				log.Printf(
-					"command dispatch received: node_id=%s command_id=%s capability=%s payload_len=%d",
-					nodeID,
-					commandID,
-					capability,
-					len(dispatch.GetPayloadJson()),
-				)
-			case capability == terminalExecCapabilityName:
-				log.Printf(
-					"command dispatch received: node_id=%s command_id=%s capability=%s payload_len=%d",
-					nodeID,
-					commandID,
-					capability,
-					len(dispatch.GetPayloadJson()),
-				)
-			case capability == terminalResourceCapabilityName:
-				log.Printf(
-					"command dispatch received: node_id=%s command_id=%s capability=%s payload_len=%d",
-					nodeID,
-					commandID,
-					capability,
-					len(dispatch.GetPayloadJson()),
-				)
-			default:
-				log.Printf(
-					"command dispatch received: node_id=%s command_id=%s capability=%s",
-					nodeID,
-					commandID,
-					capability,
-				)
-			}
+			summary := commandDispatchSummaryForLog(capability, dispatch.GetPayloadJson())
+			logging.Infof("command dispatch received: command_id=%s capability=%s summary=%s", commandID, capability, summary)
 
 			dispatchCopy, ok := proto.Clone(dispatch).(*registryv1.CommandDispatch)
 			if !ok || dispatchCopy == nil {
@@ -195,6 +157,83 @@ func receiverLoop(
 			reportSessionErr(errCh, errors.New("unexpected response frame"))
 			return
 		}
+	}
+}
+
+func commandDispatchSummaryForLog(capability string, payload []byte) string {
+	parseFailed := fmt.Sprintf("payload_len=%d summary=parse_failed", len(payload))
+
+	switch strings.TrimSpace(strings.ToLower(capability)) {
+	case echoCapabilityName:
+		decoded := struct {
+			Message string `json:"message"`
+		}{}
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			return parseFailed
+		}
+		if strings.TrimSpace(decoded.Message) == "" {
+			return parseFailed
+		}
+		return fmt.Sprintf("message_len=%d", len(decoded.Message))
+	case pythonExecCapabilityName:
+		decoded := pythonExecPayload{}
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			return parseFailed
+		}
+		if strings.TrimSpace(decoded.Code) == "" {
+			return parseFailed
+		}
+		return fmt.Sprintf("code_len=%d", len(decoded.Code))
+	case terminalExecCapabilityName:
+		decoded := terminalExecPayload{}
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			return parseFailed
+		}
+		if strings.TrimSpace(decoded.Command) == "" {
+			return parseFailed
+		}
+
+		leaseTTLSec := "default"
+		if decoded.LeaseTTLSec != nil {
+			leaseTTLSec = strconv.Itoa(*decoded.LeaseTTLSec)
+		}
+		return fmt.Sprintf(
+			"command_len=%d session_id_present=%t create_if_missing=%t lease_ttl_sec=%s",
+			len(decoded.Command),
+			strings.TrimSpace(decoded.SessionID) != "",
+			decoded.CreateIfMissing,
+			leaseTTLSec,
+		)
+	case terminalResourceCapabilityName:
+		decoded := terminalResourcePayload{}
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			return parseFailed
+		}
+		sessionPresent := strings.TrimSpace(decoded.SessionID) != ""
+		path := strings.TrimSpace(decoded.FilePath)
+		if !sessionPresent || path == "" {
+			return parseFailed
+		}
+
+		actionSummary := "default"
+		switch strings.TrimSpace(strings.ToLower(decoded.Action)) {
+		case "":
+			actionSummary = "default"
+		case terminalResourceActionValidate:
+			actionSummary = terminalResourceActionValidate
+		case terminalResourceActionRead:
+			actionSummary = terminalResourceActionRead
+		default:
+			actionSummary = "invalid"
+		}
+		return fmt.Sprintf(
+			"action=%s session_id_present=%t file_path_len=%d",
+			actionSummary,
+			sessionPresent,
+			len(path),
+		)
+	default:
+		return fmt.Sprintf("payload_len=%d summary=unsupported_capability", len(payload))
 	}
 }
 

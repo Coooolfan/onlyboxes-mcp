@@ -27,6 +27,8 @@ Version report:
 Capability behavior:
 - `worker-docker` hardcodes capability declarations to `echo`, `pythonExec`, `terminalExec`, and `terminalResource`.
 - each capability declaration includes `max_inflight=4`.
+- startup logs include execution config summaries for `pythonExec` and `terminalExec` (image/lease/output-limit).
+- command dispatch logs are summary-only and do not include raw command/code/path/message content.
 - when receiving an `echo` command, worker returns the exact input string unchanged.
 - when receiving a `pythonExec` command, worker expects `payload_json` with `{"code":"..."}` and runs:
   - `docker create --name <generated-name> --label onlyboxes.managed=true --label onlyboxes.capability=pythonExec --label onlyboxes.runtime=worker-docker --memory 256m --cpus 1.0 --pids-limit 128 <python_exec_image> python -c <code>`

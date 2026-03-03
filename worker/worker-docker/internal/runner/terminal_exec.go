@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/logging"
 )
 
 const (
@@ -464,11 +464,11 @@ func (m *terminalSessionManager) forceRemoveContainer(containerName string) {
 
 	result := runDockerCommand(cleanupCtx, pythonExecDockerRemoveArgs(containerName)...)
 	if result.Err != nil {
-		log.Printf("terminalExec cleanup failed: container=%s err=%v", containerName, result.Err)
+		logging.Warnf("terminalExec cleanup failed: container=%s err=%v", containerName, result.Err)
 		return
 	}
 	if result.ExitCode != 0 && !isNoSuchContainerMessage(result.Stderr) {
-		log.Printf(
+		logging.Warnf(
 			"terminalExec cleanup failed: container=%s %s",
 			containerName,
 			dockerCommandFailureMessage("exit code", result.ExitCode, result.Stderr),

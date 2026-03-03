@@ -3,11 +3,11 @@ package runner
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/config"
+	"github.com/onlyboxes/onlyboxes/worker/worker-docker/internal/logging"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -76,6 +76,23 @@ func Run(ctx context.Context, cfg config.Config) error {
 		terminalManager.Close()
 	}()
 
+	pythonImage := strings.TrimSpace(cfg.PythonExecDockerImage)
+	if pythonImage == "" {
+		pythonImage = defaultPythonExecDockerImage
+	}
+	logging.Infof("pythonExec configured: image=%s", pythonImage)
+	logging.Infof(
+		"terminalExec configured: image=%s",
+		terminalManager.dockerImage,
+	)
+	logging.Infof(
+		"terminalExec configured: lease_min_sec=%d lease_max_sec=%d lease_default_sec=%d output_limit_bytes=%d",
+		terminalManager.leaseMinSec,
+		terminalManager.leaseMaxSec,
+		terminalManager.leaseDefaultSec,
+		terminalManager.outputLimitBytes,
+	)
+
 	reconnectDelay := initialReconnectDelay
 	for {
 		if err := ctx.Err(); err != nil {
@@ -92,10 +109,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 
 		if status.Code(err) == codes.FailedPrecondition {
-			log.Printf("registry session replaced for node_id=%s, reconnecting", cfg.WorkerID)
+			logging.Warnf("registry session replaced for node_id=%s, reconnecting", cfg.WorkerID)
 			reconnectDelay = initialReconnectDelay
 		} else {
-			log.Printf("registry session interrupted: %v", err)
+			logging.Warnf("registry session interrupted: %v", err)
 		}
 
 		if err := waitReconnect(ctx, reconnectDelay); err != nil {
