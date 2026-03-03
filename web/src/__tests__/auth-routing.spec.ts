@@ -107,6 +107,33 @@ describe('Auth Routing', () => {
     wrapper.unmount()
   })
 
+  it('allows non-admin /tools/worker-startup access', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/console/session') {
+        return jsonResponse(memberSessionPayload)
+      }
+      if (url === '/api/v1/console/tokens') {
+        return jsonResponse(defaultTokensPayload())
+      }
+      if (url.startsWith('/api/v1/workers')) {
+        throw new Error(`workers api should not be called on startup tool page: ${url}`)
+      }
+      if (url.startsWith('/api/v1/console/accounts')) {
+        throw new Error(`accounts api should not be called on startup tool page: ${url}`)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+    const wrapper = await mountApp('/tools/worker-startup')
+
+    expect(router.currentRoute.value.path).toBe('/tools/worker-startup')
+    expect(wrapper.text()).toContain('Worker Startup Tool')
+
+    wrapper.unmount()
+  })
+
   it('redirects non-admin /accounts access to /tokens', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

@@ -34,6 +34,15 @@ const router = createRouter({
       },
     },
     {
+      path: '/tools/worker-startup',
+      name: 'worker-startup-tool',
+      component: () => import('@/views/WorkerStartupToolPage.vue'),
+      meta: {
+        requiresAuth: true,
+        layout: 'dashboard',
+      },
+    },
+    {
       path: '/accounts',
       name: 'accounts',
       component: () => import('@/views/AccountsPage.vue'),

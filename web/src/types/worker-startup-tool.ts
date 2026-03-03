@@ -1,0 +1,42 @@
+export type WorkerStartupKind = 'worker-docker' | 'worker-sys'
+
+export type WorkerCallTimeoutMode = 'auto' | 'manual'
+
+export type WorkerSysWhitelistMode = 'exact' | 'prefix' | 'allow_all'
+
+export interface WorkerStartupBaseConfig {
+  workerID: string
+  workerSecret: string
+  consoleGRPCTarget: string
+  consoleInsecure: boolean
+  heartbeatIntervalSec: number
+  heartbeatJitterPct: number
+  callTimeoutMode: WorkerCallTimeoutMode
+  callTimeoutSec: number
+  binaryPath: string
+  nodeName: string
+  version: string
+  labelsText: string
+}
+
+export interface WorkerDockerStartupConfig extends WorkerStartupBaseConfig {
+  pythonExecDockerImage: string
+  terminalExecDockerImage: string
+  terminalLeaseMinSec: number
+  terminalLeaseMaxSec: number
+  terminalLeaseDefaultSec: number
+  terminalOutputLimitBytes: number
+}
+
+export interface WorkerSysStartupConfig extends WorkerStartupBaseConfig {
+  computerUseOutputLimitBytes: number
+  computerUseCommandWhitelistMode: WorkerSysWhitelistMode
+  computerUseCommandWhitelistText: string
+  readImageAllowedPathsText: string
+}
+
+export interface StartupCommandBuildResult {
+  command: string
+  errors: string[]
+  warnings: string[]
+}

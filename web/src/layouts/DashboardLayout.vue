@@ -29,12 +29,13 @@ if (typeof window !== 'undefined') {
 type NavItem = {
   label: string
   to: string
-  icon: 'box' | 'users' | 'key'
+  icon: 'box' | 'users' | 'key' | 'sliders'
   requiresAdmin?: boolean
 }
 
 const navItems: NavItem[] = [
   { label: 'Workers', to: '/workers', icon: 'box' },
+  { label: 'Worker Tool', to: '/tools/worker-startup', icon: 'sliders' },
   { label: 'Accounts', to: '/accounts', icon: 'users', requiresAdmin: true },
   { label: 'Tokens', to: '/tokens', icon: 'key' },
 ]
