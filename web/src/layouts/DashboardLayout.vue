@@ -35,9 +35,9 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { label: 'Workers', to: '/workers', icon: 'box' },
-  { label: 'Worker Tool', to: '/tools/worker-startup', icon: 'sliders' },
   { label: 'Accounts', to: '/accounts', icon: 'users', requiresAdmin: true },
   { label: 'Tokens', to: '/tokens', icon: 'key' },
+  { label: 'Worker Tool', to: '/tools/worker-startup', icon: 'sliders' },
 ]
 
 const filteredNavItems = computed(() => {
