@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,8 +12,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestNewMCPAuthWithPersistenceNilReturnsError(t *testing.T) {
+	auth, err := NewMCPAuthWithPersistence(nil)
+	if !errors.Is(err, ErrMCPPersistenceDBRequired) {
+		t.Fatalf("expected ErrMCPPersistenceDBRequired, got %v", err)
+	}
+	if auth != nil {
+		t.Fatalf("expected nil auth when persistence db is nil")
+	}
+}
+
 func TestMCPAuthRequireTokenRejectsMissingHeader(t *testing.T) {
-	auth := newBareTestMCPAuth()
+	auth := newBareTestMCPAuth(t)
 	token := "token-a"
 	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
 		t.Fatalf("seed token: %v", err)
@@ -32,7 +43,7 @@ func TestMCPAuthRequireTokenRejectsMissingHeader(t *testing.T) {
 }
 
 func TestMCPAuthRequireTokenRejectsLegacyTokenHeader(t *testing.T) {
-	auth := newBareTestMCPAuth()
+	auth := newBareTestMCPAuth(t)
 	token := "token-a"
 	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
 		t.Fatalf("seed token: %v", err)
@@ -53,7 +64,7 @@ func TestMCPAuthRequireTokenRejectsLegacyTokenHeader(t *testing.T) {
 }
 
 func TestMCPAuthRequireTokenRejectsNonBearerAuthorization(t *testing.T) {
-	auth := newBareTestMCPAuth()
+	auth := newBareTestMCPAuth(t)
 	token := "token-a"
 	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
 		t.Fatalf("seed token: %v", err)
@@ -74,7 +85,7 @@ func TestMCPAuthRequireTokenRejectsNonBearerAuthorization(t *testing.T) {
 }
 
 func TestMCPAuthRequireTokenRejectsBearerWithoutToken(t *testing.T) {
-	auth := newBareTestMCPAuth()
+	auth := newBareTestMCPAuth(t)
 	token := "token-a"
 	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
 		t.Fatalf("seed token: %v", err)
@@ -95,7 +106,7 @@ func TestMCPAuthRequireTokenRejectsBearerWithoutToken(t *testing.T) {
 }
 
 func TestMCPAuthRequireTokenRejectsWrongToken(t *testing.T) {
-	auth := newBareTestMCPAuth()
+	auth := newBareTestMCPAuth(t)
 	token := "token-a"
 	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
 		t.Fatalf("seed token: %v", err)
@@ -116,7 +127,7 @@ func TestMCPAuthRequireTokenRejectsWrongToken(t *testing.T) {
 }
 
 func TestMCPAuthRequireTokenAllowsTrustedToken(t *testing.T) {
-	auth := newBareTestMCPAuth()
+	auth := newBareTestMCPAuth(t)
 	token := "token-a"
 	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &token); err != nil {
 		t.Fatalf("seed token: %v", err)
@@ -143,7 +154,7 @@ func TestMCPAuthRequireTokenAllowsTrustedToken(t *testing.T) {
 }
 
 func TestMCPAuthRequireTokenRejectsWhenStoreIsEmpty(t *testing.T) {
-	auth := newBareTestMCPAuth()
+	auth := newBareTestMCPAuth(t)
 	router := gin.New()
 	router.GET("/mcp", auth.RequireToken(), func(c *gin.Context) {
 		c.Status(http.StatusOK)
@@ -160,7 +171,7 @@ func TestMCPAuthRequireTokenRejectsWhenStoreIsEmpty(t *testing.T) {
 }
 
 func TestMCPAuthTokenCRUD(t *testing.T) {
-	auth := newBareTestMCPAuth()
+	auth := newBareTestMCPAuth(t)
 	router := gin.New()
 	router.Use(withTestSessionAccount(SessionAccount{AccountID: testDashboardAccountID, Username: testDashboardUsername, IsAdmin: true}))
 	router.POST("/tokens", auth.CreateToken)
@@ -247,7 +258,7 @@ func TestMCPAuthTokenCRUD(t *testing.T) {
 }
 
 func TestMCPAuthCreateTokenConflicts(t *testing.T) {
-	auth := newBareTestMCPAuth()
+	auth := newBareTestMCPAuth(t)
 	router := gin.New()
 	router.Use(withTestSessionAccount(SessionAccount{AccountID: testDashboardAccountID, Username: testDashboardUsername, IsAdmin: true}))
 	router.POST("/tokens", auth.CreateToken)
@@ -278,9 +289,9 @@ func TestMCPAuthCreateTokenConflicts(t *testing.T) {
 }
 
 func TestMCPAuthTokenIsolationByAccount(t *testing.T) {
-	auth := newBareTestMCPAuth()
+	auth := newBareTestMCPAuth(t)
 	secondAccount := SessionAccount{AccountID: "acc-test-member-b", Username: "member-b", IsAdmin: false}
-	seedTestAccount(auth.queries, secondAccount.AccountID, secondAccount.Username, "member-b-password", false)
+	seedTestAccount(t, auth.queries, secondAccount.AccountID, secondAccount.Username, "member-b-password", false)
 
 	routerAdmin := gin.New()
 	routerAdmin.Use(withTestSessionAccount(SessionAccount{AccountID: testDashboardAccountID, Username: testDashboardUsername, IsAdmin: true}))

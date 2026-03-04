@@ -39,6 +39,7 @@ var (
 	errAccountNotFound                = errors.New("account not found")
 	errAccountDeleteSelfForbidden     = errors.New("cannot delete current account")
 	errAccountDeleteAdminForbidden    = errors.New("cannot delete admin account")
+	ErrConsoleQueriesRequired         = errors.New("console auth requires non-nil queries")
 	accountIDGenerator                = generateAccountID
 )
 
@@ -150,14 +151,14 @@ const (
 	accountInsertConflictUsernameKey
 )
 
-func NewConsoleAuth(queries *sqlc.Queries, registrationEnabled bool) *ConsoleAuth {
+func NewConsoleAuth(queries *sqlc.Queries, registrationEnabled bool) (*ConsoleAuth, error) {
 	if queries == nil {
-		panic("console auth requires non-nil queries")
+		return nil, ErrConsoleQueriesRequired
 	}
 	return &ConsoleAuth{
 		queries:             queries,
 		registrationEnabled: registrationEnabled,
 		sessions:            make(map[string]accountSessionState),
 		nowFn:               time.Now,
-	}
+	}, nil
 }

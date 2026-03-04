@@ -26,5 +26,9 @@ func NewStore(t testing.TB) *registry.Store {
 	if err != nil {
 		t.Fatalf("open test registry db: %v", err)
 	}
-	return registry.NewStoreWithPersistence(db)
+	store, err := registry.NewStoreWithPersistence(db)
+	if err != nil {
+		t.Fatalf("new registry store: %v", err)
+	}
+	return store
 }

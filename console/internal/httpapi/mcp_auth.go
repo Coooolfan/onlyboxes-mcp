@@ -44,6 +44,7 @@ var (
 	errTrustedTokenNotFound         = errors.New("token not found")
 	errTrustedTokenGenerateFailed   = errors.New("failed to generate token")
 	errTrustedTokenIDGenerateFailed = errors.New("failed to generate token id")
+	ErrMCPPersistenceDBRequired     = errors.New("mcp auth requires non-nil persistence db")
 )
 
 type trustedTokenItem struct {
@@ -100,9 +101,9 @@ type MCPAuth struct {
 	nowFn   func() time.Time
 }
 
-func NewMCPAuthWithPersistence(db *persistence.DB) *MCPAuth {
+func NewMCPAuthWithPersistence(db *persistence.DB) (*MCPAuth, error) {
 	if db == nil {
-		panic("mcp auth requires non-nil persistence db")
+		return nil, ErrMCPPersistenceDBRequired
 	}
 	auth := &MCPAuth{
 		db:      db,
@@ -110,7 +111,7 @@ func NewMCPAuthWithPersistence(db *persistence.DB) *MCPAuth {
 		hasher:  db.Hasher,
 		nowFn:   time.Now,
 	}
-	return auth
+	return auth, nil
 }
 
 func (a *MCPAuth) RequireToken() gin.HandlerFunc {

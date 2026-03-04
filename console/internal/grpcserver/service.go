@@ -105,9 +105,7 @@ func NewRegistryService(
 		terminalRouteTTL:             defaultTerminalRouteTTL,
 		tasks:                        make(map[string]*taskRecord),
 		taskRequestReservations:      make(map[string]struct{}),
-		criticalPersistenceFailureFn: func(err error) {
-			panic(err)
-		},
+		criticalPersistenceFailureFn: func(error) {},
 	}
 }
 

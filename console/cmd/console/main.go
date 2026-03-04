@@ -68,7 +68,10 @@ func main() {
 		)
 	}
 
-	store := registry.NewStoreWithPersistence(db)
+	store, err := registry.NewStoreWithPersistence(db)
+	if err != nil {
+		fatal("failed to initialize registry store", "error", err)
+	}
 	initialCredentialHashes := store.ListCredentialHashes()
 
 	registryService := grpcserver.NewRegistryService(
@@ -89,11 +92,21 @@ func main() {
 		registryService,
 		cfg.GRPCAddr,
 	)
-	consoleAuth := httpapi.NewConsoleAuth(db.Queries, cfg.EnableRegistration)
-	mcpAuth := httpapi.NewMCPAuthWithPersistence(db)
+	consoleAuth, err := httpapi.NewConsoleAuth(db.Queries, cfg.EnableRegistration)
+	if err != nil {
+		fatal("failed to initialize console auth", "error", err)
+	}
+	mcpAuth, err := httpapi.NewMCPAuthWithPersistence(db)
+	if err != nil {
+		fatal("failed to initialize mcp auth", "error", err)
+	}
+	router, err := httpapi.NewRouter(httpHandler, consoleAuth, mcpAuth)
+	if err != nil {
+		fatal("failed to initialize http router", "error", err)
+	}
 	httpSrv := &http.Server{
 		Addr:    cfg.HTTPAddr,
-		Handler: httpapi.NewRouter(httpHandler, consoleAuth, mcpAuth),
+		Handler: router,
 	}
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()

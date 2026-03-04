@@ -43,7 +43,7 @@ func TestWorkerStatsAggregatesAllWorkers(t *testing.T) {
 	handler.nowFn = func() time.Time {
 		return now
 	}
-	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
+	router := mustNewRouter(t, handler, newTestConsoleAuth(t), newTestMCPAuth(t))
 	cookie := loginSessionCookie(t, router)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/stats", nil)
@@ -87,7 +87,7 @@ func TestWorkerStatsSupportsCustomStaleThreshold(t *testing.T) {
 	handler.nowFn = func() time.Time {
 		return now
 	}
-	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
+	router := mustNewRouter(t, handler, newTestConsoleAuth(t), newTestMCPAuth(t))
 	cookie := loginSessionCookie(t, router)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/stats?stale_after_sec=10", nil)
@@ -114,7 +114,7 @@ func TestWorkerStatsSupportsCustomStaleThreshold(t *testing.T) {
 func TestWorkerStatsRejectsInvalidStaleThreshold(t *testing.T) {
 	store := registrytest.NewStore(t)
 	handler := NewWorkerHandler(store, 15*time.Second, nil, nil, nil, "")
-	router := NewRouter(handler, newTestConsoleAuth(t), newTestMCPAuth())
+	router := mustNewRouter(t, handler, newTestConsoleAuth(t), newTestMCPAuth(t))
 	cookie := loginSessionCookie(t, router)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workers/stats?stale_after_sec=0", nil)
@@ -150,7 +150,7 @@ func TestWorkerStatsAndInflightAreOwnerScopedForNonAdmin(t *testing.T) {
 	}
 
 	consoleAuth := newTestConsoleAuth(t)
-	seedTestAccount(consoleAuth.queries, "acc-member-1", "member-test", "member-password", false)
+	seedTestAccount(t, consoleAuth.queries, "acc-member-1", "member-test", "member-password", false)
 	handler := NewWorkerHandler(
 		store,
 		15*time.Second,
@@ -175,7 +175,7 @@ func TestWorkerStatsAndInflightAreOwnerScopedForNonAdmin(t *testing.T) {
 		"",
 	)
 	handler.nowFn = func() time.Time { return now }
-	router := NewRouter(handler, consoleAuth, newTestMCPAuth())
+	router := mustNewRouter(t, handler, consoleAuth, newTestMCPAuth(t))
 	cookie := loginSessionCookieFor(t, router, "member-test", "member-password")
 
 	statsReq := httptest.NewRequest(http.MethodGet, "/api/v1/workers/stats", nil)

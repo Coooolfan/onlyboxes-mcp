@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -306,13 +307,14 @@ func TestStoreDelete(t *testing.T) {
 	}
 }
 
-func TestNewStoreWithPersistenceNilPanics(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("expected panic when persistence db is nil")
-		}
-	}()
-	_ = NewStoreWithPersistence(nil)
+func TestNewStoreWithPersistenceNilReturnsError(t *testing.T) {
+	store, err := NewStoreWithPersistence(nil)
+	if !errors.Is(err, ErrPersistenceDBRequired) {
+		t.Fatalf("expected ErrPersistenceDBRequired, got %v", err)
+	}
+	if store != nil {
+		t.Fatalf("expected nil store when persistence db is nil")
+	}
 }
 
 func TestStoreUpsertReturnsErrorOnTxFailure(t *testing.T) {
@@ -366,5 +368,9 @@ func newTestStore(t *testing.T) *Store {
 	t.Cleanup(func() {
 		_ = db.Close()
 	})
-	return NewStoreWithPersistence(db)
+	store, err := NewStoreWithPersistence(db)
+	if err != nil {
+		t.Fatalf("new store with persistence: %v", err)
+	}
+	return store
 }

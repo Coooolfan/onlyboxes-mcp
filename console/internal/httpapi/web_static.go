@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"embed"
+	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -14,18 +16,22 @@ const embeddedWebDistDir = "web_dist"
 //go:embed web_dist
 var embeddedWebDist embed.FS
 
-var embeddedWebFS = mustEmbeddedWebFS()
+var ErrEmbeddedWebDistRequired = errors.New("failed to load embedded web dist")
 
-func mustEmbeddedWebFS() fs.FS {
+func loadEmbeddedWebFS() (fs.FS, error) {
 	webFS, err := fs.Sub(embeddedWebDist, embeddedWebDistDir)
 	if err != nil {
-		panic("failed to load embedded web dist: " + err.Error())
+		return nil, fmt.Errorf("%w: %v", ErrEmbeddedWebDistRequired, err)
 	}
-	return webFS
+	return webFS, nil
 }
 
-func registerEmbeddedWebRoutes(router *gin.Engine) {
-	fileServer := http.FileServer(http.FS(embeddedWebFS))
+func registerEmbeddedWebRoutes(router *gin.Engine) error {
+	webFS, err := loadEmbeddedWebFS()
+	if err != nil {
+		return err
+	}
+	fileServer := http.FileServer(http.FS(webFS))
 
 	router.GET("/", gin.WrapH(fileServer))
 	router.HEAD("/", gin.WrapH(fileServer))
@@ -46,4 +52,5 @@ func registerEmbeddedWebRoutes(router *gin.Engine) {
 		}
 		c.Status(http.StatusNotFound)
 	})
+	return nil
 }

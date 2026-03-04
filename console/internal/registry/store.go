@@ -10,6 +10,7 @@ import (
 
 var ErrNodeNotFound = errors.New("worker node not found")
 var ErrSessionMismatch = errors.New("worker session mismatch")
+var ErrPersistenceDBRequired = errors.New("registry store requires non-nil persistence db")
 
 type WorkerStatus string
 
@@ -59,11 +60,11 @@ type Store struct {
 	queries *sqlc.Queries
 }
 
-func NewStoreWithPersistence(db *persistence.DB) *Store {
+func NewStoreWithPersistence(db *persistence.DB) (*Store, error) {
 	if db == nil {
-		panic("registry store requires non-nil persistence db")
+		return nil, ErrPersistenceDBRequired
 	}
-	return &Store{db: db, queries: db.Queries}
+	return &Store{db: db, queries: db.Queries}, nil
 }
 
 func (s *Store) Persistence() *persistence.DB {

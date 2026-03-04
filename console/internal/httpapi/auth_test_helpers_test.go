@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/onlyboxes/onlyboxes/console/internal/persistence"
 	"github.com/onlyboxes/onlyboxes/console/internal/persistence/sqlc"
 )
@@ -22,15 +23,7 @@ const (
 	testMCPTokenB         = "mcp-token-test-b"
 )
 
-var testDashboardAccountID = mustGenerateTestAccountID()
-
-func mustGenerateTestAccountID() string {
-	accountID, err := generateAccountID()
-	if err != nil {
-		panic(err)
-	}
-	return accountID
-}
+const testDashboardAccountID = "acc-test-dashboard"
 
 func newTestConsoleAuth(t *testing.T) *ConsoleAuth {
 	return newTestConsoleAuthWithRegistration(t, false)
@@ -51,24 +44,32 @@ func newTestConsoleAuthWithRegistration(t *testing.T, registrationEnabled bool) 
 	if err != nil {
 		t.Fatalf("open test console auth db: %v", err)
 	}
-	seedTestAccount(db.Queries, testDashboardAccountID, testDashboardUsername, testDashboardPassword, true)
-	return NewConsoleAuth(db.Queries, registrationEnabled)
-}
-
-func newTestMCPAuth() *MCPAuth {
-	auth := newBareTestMCPAuth()
-	tokenA := testMCPToken
-	tokenB := testMCPTokenB
-	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &tokenA); err != nil {
-		panic(err)
-	}
-	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-b", &tokenB); err != nil {
-		panic(err)
+	seedTestAccount(t, db.Queries, testDashboardAccountID, testDashboardUsername, testDashboardPassword, true)
+	auth, err := NewConsoleAuth(db.Queries, registrationEnabled)
+	if err != nil {
+		t.Fatalf("new console auth: %v", err)
 	}
 	return auth
 }
 
-func newBareTestMCPAuth() *MCPAuth {
+func newTestMCPAuth(t testing.TB) *MCPAuth {
+	t.Helper()
+
+	auth := newBareTestMCPAuth(t)
+	tokenA := testMCPToken
+	tokenB := testMCPTokenB
+	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-a", &tokenA); err != nil {
+		t.Fatalf("seed token-a: %v", err)
+	}
+	if _, _, err := auth.createToken(context.Background(), testDashboardAccountID, "token-b", &tokenB); err != nil {
+		t.Fatalf("seed token-b: %v", err)
+	}
+	return auth
+}
+
+func newBareTestMCPAuth(t testing.TB) *MCPAuth {
+	t.Helper()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -80,10 +81,24 @@ func newBareTestMCPAuth() *MCPAuth {
 		TaskRetentionDay: 30,
 	})
 	if err != nil {
-		panic(err)
+		t.Fatalf("open test mcp auth db: %v", err)
 	}
-	seedTestAccount(db.Queries, testDashboardAccountID, testDashboardUsername, testDashboardPassword, true)
-	return NewMCPAuthWithPersistence(db)
+	seedTestAccount(t, db.Queries, testDashboardAccountID, testDashboardUsername, testDashboardPassword, true)
+	auth, err := NewMCPAuthWithPersistence(db)
+	if err != nil {
+		t.Fatalf("new mcp auth: %v", err)
+	}
+	return auth
+}
+
+func mustNewRouter(t *testing.T, workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *MCPAuth) *gin.Engine {
+	t.Helper()
+
+	router, err := NewRouter(workerHandler, consoleAuth, mcpAuth)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	return router
 }
 
 func setMCPTokenHeader(req *http.Request) {
@@ -93,13 +108,15 @@ func setMCPTokenHeader(req *http.Request) {
 	req.Header.Set(trustedTokenHeader, "Bearer "+testMCPToken)
 }
 
-func seedTestAccount(queries *sqlc.Queries, accountID string, username string, password string, isAdmin bool) {
+func seedTestAccount(t testing.TB, queries *sqlc.Queries, accountID string, username string, password string, isAdmin bool) {
+	t.Helper()
+
 	if queries == nil {
-		panic("nil queries")
+		t.Fatalf("seed test account requires non-nil queries")
 	}
 	passwordHash, err := hashDashboardPassword(password)
 	if err != nil {
-		panic(err)
+		t.Fatalf("hash dashboard password: %v", err)
 	}
 	nowMS := time.Now().UnixMilli()
 	if err := queries.InsertAccount(context.Background(), sqlc.InsertAccountParams{
@@ -112,7 +129,7 @@ func seedTestAccount(queries *sqlc.Queries, accountID string, username string, p
 		CreatedAtUnixMs: nowMS,
 		UpdatedAtUnixMs: nowMS,
 	}); err != nil {
-		panic(err)
+		t.Fatalf("insert test account: %v", err)
 	}
 }
 

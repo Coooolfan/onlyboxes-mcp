@@ -22,6 +22,8 @@ const (
 	startupCommandHeartbeatJitter   = 20
 )
 
+var ErrMCPAuthRequired = errors.New("mcp auth is required")
+
 type WorkerHandler struct {
 	store           *registry.Store
 	offlineTTL      time.Duration
@@ -85,13 +87,13 @@ func NewWorkerHandler(
 	}
 }
 
-func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *MCPAuth) *gin.Engine {
+func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *MCPAuth) (*gin.Engine, error) {
+	if mcpAuth == nil {
+		return nil, ErrMCPAuthRequired
+	}
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
-	if mcpAuth == nil {
-		panic("mcp auth is required")
-	}
 	router.Any("/mcp", mcpAuth.RequireToken(), gin.WrapH(NewMCPHandler(workerHandler.dispatcher)))
 
 	api := router.Group("/api/v1")
@@ -110,8 +112,10 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 		api.GET("/workers/inflight", workerHandler.WorkerInflight)
 		api.POST("/workers", workerHandler.CreateWorker)
 		api.DELETE("/workers/:node_id", workerHandler.DeleteWorker)
-		registerEmbeddedWebRoutes(router)
-		return router
+		if err := registerEmbeddedWebRoutes(router); err != nil {
+			return nil, err
+		}
+		return router, nil
 	}
 
 	api.POST("/console/login", consoleAuth.Login)
@@ -138,9 +142,11 @@ func NewRouter(workerHandler *WorkerHandler, consoleAuth *ConsoleAuth, mcpAuth *
 	adminDashboard.GET("/console/accounts", consoleAuth.ListAccounts)
 	adminDashboard.DELETE("/console/accounts/:account_id", consoleAuth.DeleteAccount)
 
-	registerEmbeddedWebRoutes(router)
+	if err := registerEmbeddedWebRoutes(router); err != nil {
+		return nil, err
+	}
 
-	return router
+	return router, nil
 }
 
 func (h *WorkerHandler) ListWorkers(c *gin.Context) {

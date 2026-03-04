@@ -173,3 +173,27 @@ func TestFailTaskOnPersistenceErrorTriggersCriticalHookWhenFallbackAlsoFails(t *
 		t.Fatalf("expected critical hook error context, got %v", hookErr)
 	}
 }
+
+func TestFailTaskOnPersistenceErrorDoesNotPanicWithDefaultCriticalHook(t *testing.T) {
+	svc := NewRegistryService(registrytest.NewStore(t), nil, 5, 15, 60*time.Second)
+	now := time.Unix(1_700_000_350, 0)
+	svc.nowFn = func() time.Time { return now }
+
+	const taskID = "task-persist-fallback-no-panic"
+	insertQueuedTaskForTest(t, svc, taskID, "owner-a", "echo", now)
+
+	if err := svc.store.Persistence().Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	defer func() {
+		if recover() != nil {
+			t.Fatalf("expected no panic when critical persistence fallback fails")
+		}
+	}()
+
+	err := svc.failTaskOnPersistenceError(taskID, "mark_running", errors.New("original persistence error"))
+	if err == nil {
+		t.Fatalf("expected failTaskOnPersistenceError to return error when fallback write fails")
+	}
+}
