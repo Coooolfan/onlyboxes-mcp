@@ -15,6 +15,9 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("CONSOLE_DASHBOARD_USERNAME", "")
 	t.Setenv("CONSOLE_DASHBOARD_PASSWORD", "")
 	t.Setenv("CONSOLE_ENABLE_REGISTRATION", "")
+	t.Setenv("CONSOLE_LOG_LEVEL", "")
+	t.Setenv("CONSOLE_LOG_FORMAT", "")
+	t.Setenv("CONSOLE_LOG_ADD_SOURCE", "")
 
 	cfg := Load()
 	if cfg.HTTPAddr != defaultHTTPAddr {
@@ -41,6 +44,15 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.EnableRegistration {
 		t.Fatalf("expected registration disabled by default")
 	}
+	if cfg.LogLevel != defaultLogLevel {
+		t.Fatalf("expected LogLevel=%q, got %q", defaultLogLevel, cfg.LogLevel)
+	}
+	if cfg.LogFormat != defaultLogFormat {
+		t.Fatalf("expected LogFormat=%q, got %q", defaultLogFormat, cfg.LogFormat)
+	}
+	if cfg.LogAddSource != defaultLogAddSource {
+		t.Fatalf("expected LogAddSource=%t, got %t", defaultLogAddSource, cfg.LogAddSource)
+	}
 }
 
 func TestLoadReadsDashboardCredentialsAndDurations(t *testing.T) {
@@ -51,6 +63,9 @@ func TestLoadReadsDashboardCredentialsAndDurations(t *testing.T) {
 	t.Setenv("CONSOLE_HEARTBEAT_INTERVAL_SEC", "10")
 	t.Setenv("CONSOLE_DB_PATH", "/var/lib/onlyboxes/console.db")
 	t.Setenv("CONSOLE_ENABLE_REGISTRATION", "true")
+	t.Setenv("CONSOLE_LOG_LEVEL", "debug")
+	t.Setenv("CONSOLE_LOG_FORMAT", "text")
+	t.Setenv("CONSOLE_LOG_ADD_SOURCE", "true")
 
 	cfg := Load()
 	if cfg.DashboardUsername != "admin" {
@@ -73,6 +88,15 @@ func TestLoadReadsDashboardCredentialsAndDurations(t *testing.T) {
 	}
 	if !cfg.EnableRegistration {
 		t.Fatalf("expected registration enabled")
+	}
+	if cfg.LogLevel != "debug" {
+		t.Fatalf("expected LogLevel=debug, got %q", cfg.LogLevel)
+	}
+	if cfg.LogFormat != "text" {
+		t.Fatalf("expected LogFormat=text, got %q", cfg.LogFormat)
+	}
+	if !cfg.LogAddSource {
+		t.Fatalf("expected LogAddSource=true")
 	}
 }
 
@@ -98,5 +122,22 @@ func TestLoadRegistrationFlagFallback(t *testing.T) {
 	cfg := Load()
 	if cfg.EnableRegistration {
 		t.Fatalf("expected invalid bool value to fallback to false")
+	}
+}
+
+func TestLoadLogConfigFallback(t *testing.T) {
+	t.Setenv("CONSOLE_LOG_LEVEL", "verbose")
+	t.Setenv("CONSOLE_LOG_FORMAT", "yaml")
+	t.Setenv("CONSOLE_LOG_ADD_SOURCE", "not-a-bool")
+
+	cfg := Load()
+	if cfg.LogLevel != defaultLogLevel {
+		t.Fatalf("expected LogLevel fallback=%q, got %q", defaultLogLevel, cfg.LogLevel)
+	}
+	if cfg.LogFormat != defaultLogFormat {
+		t.Fatalf("expected LogFormat fallback=%q, got %q", defaultLogFormat, cfg.LogFormat)
+	}
+	if cfg.LogAddSource != defaultLogAddSource {
+		t.Fatalf("expected LogAddSource fallback=%t, got %t", defaultLogAddSource, cfg.LogAddSource)
 	}
 }

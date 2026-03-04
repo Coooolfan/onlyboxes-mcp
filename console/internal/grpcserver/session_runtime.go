@@ -205,12 +205,15 @@ func (s *activeSession) unregisterPending(commandID string) {
 		return
 	}
 
-	s.pendingMu.Lock()
-	pending, ok := s.pending[commandID]
-	if ok {
-		delete(s.pending, commandID)
-	}
-	s.pendingMu.Unlock()
+	pending, ok := func() (*pendingCommand, bool) {
+		s.pendingMu.Lock()
+		defer s.pendingMu.Unlock()
+		pending, ok := s.pending[commandID]
+		if ok {
+			delete(s.pending, commandID)
+		}
+		return pending, ok
+	}()
 	if !ok || pending == nil {
 		return
 	}
@@ -228,12 +231,15 @@ func (s *activeSession) resolvePending(result *registryv1.CommandResult) {
 		return
 	}
 
-	s.pendingMu.Lock()
-	pending, ok := s.pending[commandID]
-	if ok {
-		delete(s.pending, commandID)
-	}
-	s.pendingMu.Unlock()
+	pending, ok := func() (*pendingCommand, bool) {
+		s.pendingMu.Lock()
+		defer s.pendingMu.Unlock()
+		pending, ok := s.pending[commandID]
+		if ok {
+			delete(s.pending, commandID)
+		}
+		return pending, ok
+	}()
 	if !ok || pending == nil {
 		return
 	}
@@ -274,10 +280,13 @@ func (s *activeSession) close(err error) {
 		s.closedErr = err
 		close(s.done)
 
-		s.pendingMu.Lock()
-		pending := s.pending
-		s.pending = make(map[string]*pendingCommand)
-		s.pendingMu.Unlock()
+		pending := func() map[string]*pendingCommand {
+			s.pendingMu.Lock()
+			defer s.pendingMu.Unlock()
+			pending := s.pending
+			s.pending = make(map[string]*pendingCommand)
+			return pending
+		}()
 
 		for _, pendingEntry := range pending {
 			if pendingEntry == nil {

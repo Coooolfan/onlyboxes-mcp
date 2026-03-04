@@ -2,29 +2,69 @@ package logging
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
+	"strings"
 )
 
 const (
-	colorReset = "\033[0m"
-	colorInfo  = "\033[1;36m"
-	colorWarn  = "\033[1;33m"
-	colorError = "\033[1;31m"
-	colorFatal = "\033[1;35m"
+	defaultLogLevel     = "info"
+	defaultLogFormat    = "json"
+	defaultLogAddSource = false
 )
 
+var singleLineReplacer = strings.NewReplacer(
+	"\r\n", "\\n",
+	"\n", "\\n",
+	"\r", "\\r",
+)
+
+func formatSingleLine(format string, args ...any) string {
+	return singleLineReplacer.Replace(fmt.Sprintf(format, args...))
+}
+
+func init() {
+	Configure(defaultLogLevel, defaultLogFormat, defaultLogAddSource)
+}
+
+func Configure(level string, format string, addSource bool) {
+	slog.SetDefault(newLogger(level, format, addSource))
+}
+
 func Infof(format string, args ...any) {
-	log.Printf("%s[INFO]%s %s", colorInfo, colorReset, fmt.Sprintf(format, args...))
+	slog.Info(formatSingleLine(format, args...))
 }
 
 func Warnf(format string, args ...any) {
-	log.Printf("%s[WARN]%s %s", colorWarn, colorReset, fmt.Sprintf(format, args...))
+	slog.Warn(formatSingleLine(format, args...))
 }
 
 func Errorf(format string, args ...any) {
-	log.Printf("%s[ERROR]%s %s", colorError, colorReset, fmt.Sprintf(format, args...))
+	slog.Error(formatSingleLine(format, args...))
 }
 
 func Fatalf(format string, args ...any) {
-	log.Fatalf("%s[FATAL]%s %s", colorFatal, colorReset, fmt.Sprintf(format, args...))
+	slog.Error(formatSingleLine(format, args...))
+	os.Exit(1)
+}
+
+func newLogger(level string, format string, addSource bool) *slog.Logger {
+	resolvedLevel := slog.LevelInfo
+	switch strings.TrimSpace(strings.ToLower(level)) {
+	case "debug":
+		resolvedLevel = slog.LevelDebug
+	case "warn":
+		resolvedLevel = slog.LevelWarn
+	case "error":
+		resolvedLevel = slog.LevelError
+	}
+
+	options := &slog.HandlerOptions{
+		Level:     resolvedLevel,
+		AddSource: addSource,
+	}
+	if strings.TrimSpace(strings.ToLower(format)) == "text" {
+		return slog.New(slog.NewTextHandler(os.Stdout, options))
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, options))
 }

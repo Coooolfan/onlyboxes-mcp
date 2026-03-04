@@ -116,8 +116,8 @@ func (s *RegistryService) SetTaskRetention(retention time.Duration) {
 		return
 	}
 	s.tasksMu.Lock()
+	defer s.tasksMu.Unlock()
 	s.taskRetention = retention
-	s.tasksMu.Unlock()
 }
 
 func (s *RegistryService) PruneExpiredTasks(now time.Time) int {

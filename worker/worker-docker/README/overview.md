@@ -84,6 +84,14 @@ Defaults:
 - terminalExec image: `coolfan1024/onlyboxes-default-worker:0.0.3`
 - terminal lease min/max/default: `60s` / `1800s` / `60s`
 - terminal output limit: `1048576` bytes per stream (`stdout`/`stderr`)
+- log level: `info`
+- log format: `json`
+- log add source: `false`
+
+Logging config:
+- `WORKER_LOG_LEVEL`: `debug|info|warn|error` (default `info`)
+- `WORKER_LOG_FORMAT`: `json|text` (default `json`)
+- `WORKER_LOG_ADD_SOURCE`: include source file/line in logs (default `false`)
 
 Recommended setting:
 - `WORKER_CALL_TIMEOUT_SEC >= 2 * WORKER_HEARTBEAT_INTERVAL_SEC`

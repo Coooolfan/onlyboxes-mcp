@@ -13,6 +13,7 @@ import (
 
 func main() {
 	cfg := config.Load()
+	logging.Configure(cfg.LogLevel, cfg.LogFormat, cfg.LogAddSource)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

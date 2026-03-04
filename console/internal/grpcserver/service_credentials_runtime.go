@@ -3,7 +3,7 @@ package grpcserver
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -23,13 +23,13 @@ func (s *RegistryService) SetHasher(hasher *persistence.Hasher) {
 		return
 	}
 	s.credentialsMu.Lock()
+	defer s.credentialsMu.Unlock()
 	s.hasher = hasher
 	if hasher != nil {
 		s.credentialHashAlgo = persistence.HashAlgorithmHMACSHA256
 	} else {
 		s.credentialHashAlgo = "legacy-plain"
 	}
-	s.credentialsMu.Unlock()
 }
 
 func (s *RegistryService) GetWorkerSecret(nodeID string) (string, bool) {
@@ -78,7 +78,7 @@ func (s *RegistryService) CreateProvisionedWorkerForOwner(
 			{
 				NodeID: workerID,
 				Labels: map[string]string{
-					"source":                     "console-ui",
+					"source":                    "console-ui",
 					registry.LabelOwnerIDKey:    normalizedOwnerID,
 					registry.LabelWorkerTypeKey: normalizedWorkerType,
 				},
@@ -100,13 +100,15 @@ func (s *RegistryService) CreateProvisionedWorkerForOwner(
 		}
 
 		credentialValue := workerSecret
-		hashAlgo := "legacy-plain"
-		s.credentialsMu.RLock()
-		hasher := s.hasher
-		if strings.TrimSpace(s.credentialHashAlgo) != "" {
-			hashAlgo = s.credentialHashAlgo
-		}
-		s.credentialsMu.RUnlock()
+		hasher, hashAlgo := func() (*persistence.Hasher, string) {
+			s.credentialsMu.RLock()
+			defer s.credentialsMu.RUnlock()
+			hashAlgo := "legacy-plain"
+			if strings.TrimSpace(s.credentialHashAlgo) != "" {
+				hashAlgo = s.credentialHashAlgo
+			}
+			return s.hasher, hashAlgo
+		}()
 		if hasher != nil {
 			credentialValue = hasher.Hash(workerSecret)
 		}
@@ -160,9 +162,12 @@ func (s *RegistryService) getCredential(nodeID string) (string, bool) {
 		return "", false
 	}
 
-	s.credentialsMu.RLock()
-	secret, ok := s.credentials[trimmedNodeID]
-	s.credentialsMu.RUnlock()
+	secret, ok := func() (string, bool) {
+		s.credentialsMu.RLock()
+		defer s.credentialsMu.RUnlock()
+		secret, ok := s.credentials[trimmedNodeID]
+		return secret, ok
+	}()
 	if ok {
 		return secret, true
 	}
@@ -173,9 +178,11 @@ func (s *RegistryService) getCredential(nodeID string) (string, bool) {
 	if !exists {
 		return "", false
 	}
-	s.credentialsMu.Lock()
-	s.credentials[trimmedNodeID] = hash
-	s.credentialsMu.Unlock()
+	func() {
+		s.credentialsMu.Lock()
+		defer s.credentialsMu.Unlock()
+		s.credentials[trimmedNodeID] = hash
+	}()
 	return hash, true
 }
 
@@ -218,15 +225,18 @@ func (s *RegistryService) disconnectWorker(nodeID string, reason string) {
 		return
 	}
 
-	s.sessionsMu.Lock()
-	session := s.sessions[trimmedNodeID]
-	if session != nil {
-		delete(s.sessions, trimmedNodeID)
-	}
-	s.sessionsMu.Unlock()
+	session := func() *activeSession {
+		s.sessionsMu.Lock()
+		defer s.sessionsMu.Unlock()
+		session := s.sessions[trimmedNodeID]
+		if session != nil {
+			delete(s.sessions, trimmedNodeID)
+		}
+		return session
+	}()
 	if s.store != nil {
 		if err := s.store.ClearSessionByNode(trimmedNodeID); err != nil {
-			log.Printf("failed to clear worker session by node: node_id=%s err=%v", trimmedNodeID, err)
+			slog.Error("failed to clear worker session by node", "node_id", trimmedNodeID, "error", err)
 		}
 	}
 

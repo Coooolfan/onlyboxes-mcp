@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -160,21 +160,28 @@ func (s *RegistryService) SubmitTask(ctx context.Context, req SubmitTaskRequest)
 	requestKey := taskRequestScopeKey(ownerID, requestID)
 	requestReserved := false
 	if requestID != "" {
-		s.tasksMu.Lock()
-		if _, reserved := s.taskRequestReservations[requestKey]; reserved {
-			s.tasksMu.Unlock()
+		reserved := func() bool {
+			s.tasksMu.Lock()
+			defer s.tasksMu.Unlock()
+			if _, exists := s.taskRequestReservations[requestKey]; exists {
+				return false
+			}
+			s.taskRequestReservations[requestKey] = struct{}{}
+			return true
+		}()
+		if !reserved {
 			return SubmitTaskResult{}, ErrTaskRequestInProgress
 		}
-		s.taskRequestReservations[requestKey] = struct{}{}
 		requestReserved = true
-		s.tasksMu.Unlock()
 		defer func() {
 			if !requestReserved {
 				return
 			}
-			s.tasksMu.Lock()
-			delete(s.taskRequestReservations, requestKey)
-			s.tasksMu.Unlock()
+			func() {
+				s.tasksMu.Lock()
+				defer s.tasksMu.Unlock()
+				delete(s.taskRequestReservations, requestKey)
+			}()
 		}()
 		existing, found := s.getTaskByOwnerAndRequest(ownerID, requestID)
 		if found {
@@ -229,9 +236,11 @@ func (s *RegistryService) SubmitTask(ctx context.Context, req SubmitTaskRequest)
 	}
 	s.setTaskRuntime(taskID, runtimeRecord)
 	if requestReserved {
-		s.tasksMu.Lock()
-		delete(s.taskRequestReservations, requestKey)
-		s.tasksMu.Unlock()
+		func() {
+			s.tasksMu.Lock()
+			defer s.tasksMu.Unlock()
+			delete(s.taskRequestReservations, requestKey)
+		}()
 		requestReserved = false
 	}
 
@@ -359,9 +368,9 @@ func (s *RegistryService) executeTask(ctx context.Context, taskID string, ownerI
 		if errors.Is(err, ErrTaskTransitionNotApplied) {
 			return
 		}
-		log.Printf("task %s failed to mark dispatched: %v", taskID, err)
+		slog.Error("failed to mark task dispatched", "task_id", taskID, "error", err)
 		if failErr := s.failTaskOnPersistenceError(taskID, "mark_dispatched", err); failErr != nil {
-			log.Printf("task %s failed to persist persistence_error after mark_dispatched: %v", taskID, failErr)
+			slog.Error("failed to persist fallback task failure", "task_id", taskID, "stage", "mark_dispatched", "error", failErr)
 		}
 		return
 	}
@@ -379,9 +388,9 @@ func (s *RegistryService) executeTask(ctx context.Context, taskID string, ownerI
 		if errors.Is(markRunningErr, ErrTaskTransitionNotApplied) {
 			return
 		}
-		log.Printf("task %s failed to mark running: %v", taskID, markRunningErr)
+		slog.Error("failed to mark task running", "task_id", taskID, "error", markRunningErr)
 		if failErr := s.failTaskOnPersistenceError(taskID, "mark_running", markRunningErr); failErr != nil {
-			log.Printf("task %s failed to persist persistence_error after mark_running: %v", taskID, failErr)
+			slog.Error("failed to persist fallback task failure", "task_id", taskID, "stage", "mark_running", "error", failErr)
 		}
 		return
 	}
@@ -390,9 +399,9 @@ func (s *RegistryService) executeTask(ctx context.Context, taskID string, ownerI
 			if errors.Is(finishErr, ErrTaskTransitionNotApplied) {
 				return
 			}
-			log.Printf("task %s failed to mark terminal with dispatch error: %v", taskID, finishErr)
+			slog.Error("failed to mark task terminal after dispatch error", "task_id", taskID, "error", finishErr)
 			if failErr := s.failTaskOnPersistenceError(taskID, "finish_error", finishErr); failErr != nil {
-				log.Printf("task %s failed to persist persistence_error after finish_error: %v", taskID, failErr)
+				slog.Error("failed to persist fallback task failure", "task_id", taskID, "stage", "finish_error", "error", failErr)
 			}
 		}
 		return
@@ -402,9 +411,9 @@ func (s *RegistryService) executeTask(ctx context.Context, taskID string, ownerI
 			if errors.Is(finishErr, ErrTaskTransitionNotApplied) {
 				return
 			}
-			log.Printf("task %s failed to mark terminal with worker error: %v", taskID, finishErr)
+			slog.Error("failed to mark task terminal after worker error", "task_id", taskID, "error", finishErr)
 			if failErr := s.failTaskOnPersistenceError(taskID, "finish_error", finishErr); failErr != nil {
-				log.Printf("task %s failed to persist persistence_error after finish_error: %v", taskID, failErr)
+				slog.Error("failed to persist fallback task failure", "task_id", taskID, "stage", "finish_error", "error", failErr)
 			}
 		}
 		return
@@ -428,9 +437,9 @@ func (s *RegistryService) executeTask(ctx context.Context, taskID string, ownerI
 			if errors.Is(err, ErrTaskTransitionNotApplied) {
 				return
 			}
-			log.Printf("task %s failed to mark invalid scoped payload: %v", taskID, err)
+			slog.Error("failed to mark task invalid scoped payload", "task_id", taskID, "error", err)
 			if failErr := s.failTaskOnPersistenceError(taskID, "finish_invalid_payload", err); failErr != nil {
-				log.Printf("task %s failed to persist persistence_error after finish_invalid_payload: %v", taskID, failErr)
+				slog.Error("failed to persist fallback task failure", "task_id", taskID, "stage", "finish_invalid_payload", "error", failErr)
 			}
 		}
 		return
@@ -439,9 +448,9 @@ func (s *RegistryService) executeTask(ctx context.Context, taskID string, ownerI
 		if errors.Is(err, ErrTaskTransitionNotApplied) {
 			return
 		}
-		log.Printf("task %s failed to mark succeeded: %v", taskID, err)
+		slog.Error("failed to mark task succeeded", "task_id", taskID, "error", err)
 		if failErr := s.failTaskOnPersistenceError(taskID, "finish_succeeded", err); failErr != nil {
-			log.Printf("task %s failed to persist persistence_error after finish_succeeded: %v", taskID, failErr)
+			slog.Error("failed to persist fallback task failure", "task_id", taskID, "stage", "finish_succeeded", "error", failErr)
 		}
 	}
 }
@@ -566,7 +575,7 @@ func (s *RegistryService) failTaskOnPersistenceError(taskID string, stage string
 	message := fmt.Sprintf("failed to persist task state at %s: %v", stage, cause)
 	if err := s.finishTask(taskID, TaskStatusFailed, nil, defaultTaskPersistErrCode, message, s.nowFn()); err != nil {
 		criticalErr := fmt.Errorf("task %s persistence fallback failed at %s: original=%w fallback=%v", taskID, stage, cause, err)
-		log.Printf("CRITICAL: %v", criticalErr)
+		slog.Error("critical task persistence fallback failure", "task_id", taskID, "stage", stage, "error", criticalErr)
 		if s.criticalPersistenceFailureFn != nil {
 			s.criticalPersistenceFailureFn(criticalErr)
 		}
@@ -636,7 +645,7 @@ func (s *RegistryService) maybePruneExpiredTasks(now time.Time) {
 		}
 	}
 	if err := s.pruneExpiredTasks(now); err != nil {
-		log.Printf("task prune failed during submit: %v", err)
+		slog.Warn("task prune failed during submit", "error", err)
 	}
 }
 
@@ -680,24 +689,26 @@ func (s *RegistryService) getTaskByOwnerAndRequest(ownerID string, requestID str
 
 func (s *RegistryService) setTaskRuntime(taskID string, record *taskRecord) {
 	s.tasksMu.Lock()
+	defer s.tasksMu.Unlock()
 	s.tasks[taskID] = record
-	s.tasksMu.Unlock()
 }
 
 func (s *RegistryService) getTaskRuntime(taskID string) *taskRecord {
 	s.tasksMu.RLock()
-	record := s.tasks[taskID]
-	s.tasksMu.RUnlock()
-	return record
+	defer s.tasksMu.RUnlock()
+	return s.tasks[taskID]
 }
 
 func (s *RegistryService) completeTaskRuntime(taskID string) {
-	s.tasksMu.Lock()
-	record := s.tasks[taskID]
-	if record != nil {
-		delete(s.tasks, taskID)
-	}
-	s.tasksMu.Unlock()
+	record := func() *taskRecord {
+		s.tasksMu.Lock()
+		defer s.tasksMu.Unlock()
+		record := s.tasks[taskID]
+		if record != nil {
+			delete(s.tasks, taskID)
+		}
+		return record
+	}()
 	s.closeTaskRuntimeRecord(record)
 }
 

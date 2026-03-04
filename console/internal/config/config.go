@@ -16,6 +16,9 @@ const (
 	defaultDBPath               = "./db/onlyboxes-console.db"
 	defaultDBBusyTimeoutMS      = 5000
 	defaultTaskRetentionDays    = 30
+	defaultLogLevel             = "info"
+	defaultLogFormat            = "json"
+	defaultLogAddSource         = false
 )
 
 type Config struct {
@@ -31,6 +34,9 @@ type Config struct {
 	HashKey              string
 	TaskRetentionDays    int
 	EnableRegistration   bool
+	LogLevel             string
+	LogFormat            string
+	LogAddSource         bool
 }
 
 func Load() Config {
@@ -53,6 +59,9 @@ func Load() Config {
 		HashKey:              os.Getenv("CONSOLE_HASH_KEY"),
 		TaskRetentionDays:    taskRetentionDays,
 		EnableRegistration:   parseBoolEnv("CONSOLE_ENABLE_REGISTRATION", false),
+		LogLevel:             parseLogLevelEnv("CONSOLE_LOG_LEVEL", defaultLogLevel),
+		LogFormat:            parseLogFormatEnv("CONSOLE_LOG_FORMAT", defaultLogFormat),
+		LogAddSource:         parseBoolEnv("CONSOLE_LOG_ADD_SOURCE", defaultLogAddSource),
 	}
 }
 
@@ -83,6 +92,32 @@ func parseBoolEnv(key string, defaultValue bool) bool {
 		return true
 	case "0", "false", "no", "off":
 		return false
+	default:
+		return defaultValue
+	}
+}
+
+func parseLogLevelEnv(key string, defaultValue string) string {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return defaultValue
+	}
+	switch value {
+	case "debug", "info", "warn", "error":
+		return value
+	default:
+		return defaultValue
+	}
+}
+
+func parseLogFormatEnv(key string, defaultValue string) string {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return defaultValue
+	}
+	switch value {
+	case "json", "text":
+		return value
 	default:
 		return defaultValue
 	}

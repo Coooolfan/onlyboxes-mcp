@@ -19,6 +19,9 @@ const (
 	computerUseWhitelistModePrefix   = "prefix"
 	computerUseWhitelistModeExact    = "exact"
 	computerUseWhitelistModeAllowAll = "allow_all"
+	defaultLogLevel                  = "info"
+	defaultLogFormat                 = "json"
+	defaultLogAddSource              = false
 )
 
 type Config struct {
@@ -37,6 +40,9 @@ type Config struct {
 	ComputerUseWhitelistMode   string
 	ComputerUseWhitelist       []string
 	ReadImageAllowedPaths      []string
+	LogLevel                   string
+	LogFormat                  string
+	LogAddSource               bool
 }
 
 func Load() Config {
@@ -69,6 +75,9 @@ func Load() Config {
 		ComputerUseWhitelistMode:   whitelistMode,
 		ComputerUseWhitelist:       whitelist,
 		ReadImageAllowedPaths:      readImageAllowedPaths,
+		LogLevel:                   parseLogLevelEnv("WORKER_LOG_LEVEL", defaultLogLevel),
+		LogFormat:                  parseLogFormatEnv("WORKER_LOG_FORMAT", defaultLogFormat),
+		LogAddSource:               parseBoolEnv("WORKER_LOG_ADD_SOURCE", defaultLogAddSource),
 	}
 }
 
@@ -102,6 +111,44 @@ func parsePercentEnv(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return parsed
+}
+
+func parseBoolEnv(key string, defaultValue bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+func parseLogLevelEnv(key string, defaultValue string) string {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return defaultValue
+	}
+	switch value {
+	case "debug", "info", "warn", "error":
+		return value
+	default:
+		return defaultValue
+	}
+}
+
+func parseLogFormatEnv(key string, defaultValue string) string {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return defaultValue
+	}
+	switch value {
+	case "json", "text":
+		return value
+	default:
+		return defaultValue
+	}
 }
 
 func defaultCallTimeoutSec(heartbeatSec int) int {

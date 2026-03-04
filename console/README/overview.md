@@ -160,6 +160,11 @@ Persistence config:
 - `CONSOLE_TASK_RETENTION_DAYS`: terminal task retention days (default `30`)
 - `CONSOLE_HASH_KEY`: required HMAC key for hashing worker secret and trusted token; missing value fails startup
 
+Logging config:
+- `CONSOLE_LOG_LEVEL`: `debug|info|warn|error` (default `info`)
+- `CONSOLE_LOG_FORMAT`: `json|text` (default `json`)
+- `CONSOLE_LOG_ADD_SOURCE`: include source file/line in logs (default `false`)
+
 MCP minimal call sequence (initialize + tools/list + tools/call):
 
 ```bash

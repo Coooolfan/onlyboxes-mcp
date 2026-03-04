@@ -21,11 +21,11 @@ func (a *ConsoleAuth) createSession(account SessionAccount) (string, time.Time, 
 	expiresAt := now.Add(dashboardSessionTTL)
 
 	a.sessionMu.Lock()
+	defer a.sessionMu.Unlock()
 	a.sessions[sessionID] = accountSessionState{
 		Account:   account,
 		ExpiresAt: expiresAt,
 	}
-	a.sessionMu.Unlock()
 
 	return sessionID, expiresAt, nil
 }
@@ -52,8 +52,8 @@ func (a *ConsoleAuth) sessionState(sessionID string) (accountSessionState, bool)
 
 func (a *ConsoleAuth) deleteSession(sessionID string) {
 	a.sessionMu.Lock()
+	defer a.sessionMu.Unlock()
 	delete(a.sessions, sessionID)
-	a.sessionMu.Unlock()
 }
 
 func (a *ConsoleAuth) deleteSessionsByAccountID(accountID string) {

@@ -5,10 +5,11 @@ import (
 	"crypto/subtle"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"strings"
 
 	registryv1 "github.com/onlyboxes/onlyboxes/api/gen/go/registry/v1"
+	"github.com/onlyboxes/onlyboxes/console/internal/persistence"
 	"github.com/onlyboxes/onlyboxes/console/internal/registry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -45,9 +46,11 @@ func (s *RegistryService) Connect(stream grpc.BidiStreamingServer[registryv1.Con
 	if workerSecret == "" {
 		return status.Error(codes.Unauthenticated, "worker_secret is required")
 	}
-	s.credentialsMu.RLock()
-	hasher := s.hasher
-	s.credentialsMu.RUnlock()
+	hasher := func() *persistence.Hasher {
+		s.credentialsMu.RLock()
+		defer s.credentialsMu.RUnlock()
+		return s.hasher
+	}()
 	if hasher != nil {
 		if !hasher.Equal(secret, workerSecret) {
 			return status.Error(codes.Unauthenticated, "invalid worker credential")
@@ -279,13 +282,16 @@ func (s *RegistryService) swapSession(session *activeSession) *activeSession {
 	if session == nil {
 		return nil
 	}
-	s.sessionsMu.Lock()
-	replaced := s.sessions[session.nodeID]
-	s.sessions[session.nodeID] = session
+	replaced := func() *activeSession {
+		s.sessionsMu.Lock()
+		defer s.sessionsMu.Unlock()
+		replaced := s.sessions[session.nodeID]
+		s.sessions[session.nodeID] = session
+		return replaced
+	}()
 	// Release sessionsMu before touching terminal route tables to avoid lock
 	// inversion with dispatch paths that read terminal routes then sessions.
 	// This leaves a tiny window where an old route may be observed once.
-	s.sessionsMu.Unlock()
 	s.clearTerminalSessionRoutesByNode(session.nodeID)
 	return replaced
 }
@@ -296,28 +302,34 @@ func (s *RegistryService) removeSession(session *activeSession) {
 	}
 	shouldClearStoreSession := false
 
-	s.sessionsMu.Lock()
-	current, ok := s.sessions[session.nodeID]
-	if !ok {
-		s.sessionsMu.Unlock()
+	func() {
+		s.sessionsMu.Lock()
+		defer s.sessionsMu.Unlock()
+		current, ok := s.sessions[session.nodeID]
+		if !ok {
+			return
+		}
+		if current.sessionID != session.sessionID {
+			return
+		}
+		delete(s.sessions, session.nodeID)
+		shouldClearStoreSession = true
+	}()
+	if !shouldClearStoreSession {
 		return
 	}
-	if current.sessionID != session.sessionID {
-		s.sessionsMu.Unlock()
-		return
-	}
-	delete(s.sessions, session.nodeID)
-	shouldClearStoreSession = true
 	// Keep the same lock order as swapSession: sessions first, then route tables.
 	// Clearing route mappings outside sessionsMu avoids cross-lock deadlocks.
-	s.sessionsMu.Unlock()
 	s.clearTerminalSessionRoutesByNode(session.nodeID)
 	if shouldClearStoreSession && s.store != nil {
 		if err := s.store.ClearSession(session.nodeID, session.sessionID); err != nil {
-			log.Printf(
-				"failed to clear worker session by node+session: node_id=%s session_id=%s err=%v",
+			slog.Error(
+				"failed to clear worker session by node+session",
+				"node_id",
 				session.nodeID,
+				"session_id",
 				session.sessionID,
+				"error",
 				err,
 			)
 		}

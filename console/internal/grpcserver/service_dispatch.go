@@ -422,12 +422,15 @@ type WorkerInflightSnapshot struct {
 
 // InflightStats returns inflight data for all active sessions.
 func (s *RegistryService) InflightStats() []WorkerInflightSnapshot {
-	s.sessionsMu.RLock()
-	sessions := make(map[string]*activeSession, len(s.sessions))
-	for k, v := range s.sessions {
-		sessions[k] = v
-	}
-	s.sessionsMu.RUnlock()
+	sessions := func() map[string]*activeSession {
+		s.sessionsMu.RLock()
+		defer s.sessionsMu.RUnlock()
+		sessions := make(map[string]*activeSession, len(s.sessions))
+		for k, v := range s.sessions {
+			sessions[k] = v
+		}
+		return sessions
+	}()
 
 	out := make([]WorkerInflightSnapshot, 0, len(sessions))
 	for _, session := range sessions {

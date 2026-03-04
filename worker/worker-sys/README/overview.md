@@ -70,6 +70,9 @@ Defaults:
 - Heartbeat jitter: `20%`
 - Call timeout: `ceil(2.5 * WORKER_HEARTBEAT_INTERVAL_SEC)` (default heartbeat `5s` => `13s`)
 - Output limit: `1048576` bytes per stream (`stdout`/`stderr`)
+- log level: `info`
+- log format: `json`
+- log add source: `false`
 
 Recommended setting:
 - `WORKER_CALL_TIMEOUT_SEC >= 2 * WORKER_HEARTBEAT_INTERVAL_SEC`
@@ -85,6 +88,9 @@ Config env:
 - `WORKER_HEARTBEAT_INTERVAL_SEC`
 - `WORKER_HEARTBEAT_JITTER_PCT`
 - `WORKER_CALL_TIMEOUT_SEC`
+- `WORKER_LOG_LEVEL`
+- `WORKER_LOG_FORMAT`
+- `WORKER_LOG_ADD_SOURCE`
 - `WORKER_COMPUTER_USE_OUTPUT_LIMIT_BYTES`
 - `WORKER_COMPUTER_USE_COMMAND_WHITELIST_MODE`
 - `WORKER_COMPUTER_USE_COMMAND_WHITELIST`

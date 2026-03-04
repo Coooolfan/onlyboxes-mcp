@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +21,8 @@ import (
 
 func main() {
 	cfg := config.Load()
+	slog.SetDefault(newLogger(cfg))
+
 	dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer dbCancel()
 	db, err := persistence.Open(dbCtx, persistence.Options{
@@ -30,11 +32,11 @@ func main() {
 		TaskRetentionDay: cfg.TaskRetentionDays,
 	})
 	if err != nil {
-		log.Fatalf("failed to initialize persistence: %v", err)
+		fatal("failed to initialize persistence", "error", err)
 	}
 	defer func() {
 		if closeErr := db.Close(); closeErr != nil {
-			log.Printf("failed to close database: %v", closeErr)
+			slog.Error("failed to close database", "error", closeErr)
 		}
 	}()
 
@@ -45,20 +47,23 @@ func main() {
 		cfg.DashboardPassword,
 	)
 	if err != nil {
-		log.Fatalf("failed to initialize admin account: %v", err)
+		fatal("failed to initialize admin account", "error", err)
 	}
 	if adminAccount.EnvIgnored {
-		log.Printf("env credentials ignored because persisted dashboard credential exists")
+		slog.Info("env credentials ignored because persisted dashboard credential exists")
 	}
 	if adminAccount.InitializedNow {
-		log.Printf(
-			"console admin account initialized username=%s password=%s",
+		slog.Info(
+			"console admin account initialized",
+			"username",
 			adminAccount.Username,
+			"password",
 			adminAccount.PasswordPlaintext,
 		)
 	} else {
-		log.Printf(
-			"console admin account loaded username=%s password not reprinted",
+		slog.Info(
+			"console admin account loaded",
+			"username",
 			adminAccount.Username,
 		)
 	}
@@ -97,13 +102,13 @@ func main() {
 
 	grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
-		log.Fatalf("failed to listen gRPC on %s: %v", cfg.GRPCAddr, err)
+		fatal("failed to listen gRPC", "addr", cfg.GRPCAddr, "error", err)
 	}
 	defer grpcListener.Close()
 
 	httpListener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {
-		log.Fatalf("failed to listen HTTP on %s: %v", cfg.HTTPAddr, err)
+		fatal("failed to listen HTTP", "addr", cfg.HTTPAddr, "error", err)
 	}
 	defer httpListener.Close()
 
@@ -119,17 +124,17 @@ func main() {
 		}
 	}()
 
-	log.Printf("console HTTP listening on %s", httpListener.Addr().String())
-	log.Printf("console gRPC listening on %s", grpcListener.Addr().String())
+	slog.Info("console HTTP listening", "addr", httpListener.Addr().String())
+	slog.Info("console gRPC listening", "addr", grpcListener.Addr().String())
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	select {
 	case <-sigCtx.Done():
-		log.Printf("shutdown signal received")
+		slog.Info("shutdown signal received")
 	case serveErr := <-errCh:
-		log.Printf("server exited with error: %v", serveErr)
+		slog.Error("server exited with error", "error", serveErr)
 	}
 	cancelRun()
 
@@ -137,7 +142,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("http shutdown error: %v", err)
+		slog.Error("http shutdown error", "error", err)
 	}
 }
 
@@ -159,7 +164,7 @@ func startOfflinePruner(ctx context.Context, store *registry.Store, offlineTTL t
 		case now := <-ticker.C:
 			removed := store.PruneOffline(now, offlineTTL)
 			if removed > 0 {
-				log.Printf("pruned %d offline worker(s)", removed)
+				slog.Info("pruned offline workers", "removed", removed)
 			}
 		}
 	}
@@ -175,7 +180,7 @@ func stopGRPCWithTimeout(grpcSrv *grpc.Server, timeout time.Duration) {
 	select {
 	case <-stopped:
 	case <-time.After(timeout):
-		log.Printf("gRPC graceful stop timed out after %s, forcing stop", timeout)
+		slog.Warn("gRPC graceful stop timed out, forcing stop", "timeout", timeout)
 		grpcSrv.Stop()
 		<-stopped
 	}
@@ -192,8 +197,34 @@ func startTaskPruner(ctx context.Context, service *grpcserver.RegistryService) {
 		case now := <-ticker.C:
 			removed := service.PruneExpiredTasks(now)
 			if removed > 0 {
-				log.Printf("pruned %d expired task(s)", removed)
+				slog.Info("pruned expired tasks", "removed", removed)
 			}
 		}
 	}
+}
+
+func newLogger(cfg config.Config) *slog.Logger {
+	level := slog.LevelInfo
+	switch cfg.LogLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+
+	options := &slog.HandlerOptions{
+		Level:     level,
+		AddSource: cfg.LogAddSource,
+	}
+	if cfg.LogFormat == "text" {
+		return slog.New(slog.NewTextHandler(os.Stdout, options))
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, options))
+}
+
+func fatal(message string, attrs ...any) {
+	slog.Error(message, attrs...)
+	os.Exit(1)
 }
